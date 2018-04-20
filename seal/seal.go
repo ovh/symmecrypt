@@ -28,7 +28,8 @@ var (
 	global    *Seal
 	globalMut sync.Mutex
 
-    SealConfigFilter = configstore.Filter().Slice(ConfigName).Unmarshal(func() interface{} { return &Seal{} })
+	// SealConfigFilter is the configstore manipulation filter used to retrieve the seal definition
+	SealConfigFilter = configstore.Filter().Slice(ConfigName).Unmarshal(func() interface{} { return &Seal{} })
 )
 
 // Seal is a shamir-sharded encryption key.

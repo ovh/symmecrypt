@@ -38,6 +38,7 @@ const (
 )
 
 var (
+	// ConfigFilter is the configstore manipulation filter used to retrieve the encryption keys
 	ConfigFilter = configstore.Filter().Slice(EncryptionKeyConfigName).Unmarshal(configFactory).Rekey(rekeyConfigByIdentifier).Reorder(reorderTimestamp)
 )
 
