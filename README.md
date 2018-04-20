@@ -19,7 +19,7 @@ and encryption key lifecycle.
 
 ## Example
 
-```
+```go
     k, err := keyloader.LoadKey("storage")
     if err != nil {
         panic(err)
@@ -105,7 +105,7 @@ Note: no matter its cipher (built-in or extended), a key can optionally be seale
 
 ```
 
-```
+```go
     symmecrypt.RegisterCipher("old-aes-algo", OldAESFactory)
 
     k, err := keyloader.LoadKey("storage")
