@@ -4,6 +4,7 @@
 It provides recommended implementations of crypto algorithms and facilities around configuration management
 and encryption key lifecycle.
 
+[![GoDoc](https://godoc.org/github.com/ovh/symmecrypt?status.svg)](https://godoc.org/github.com/ovh/symmecrypt) [![Go Report Card](https://goreportcard.com/badge/github.com/ovh/symmecrypt)](https://goreportcard.com/report/github.com/ovh/symmecrypt)
 
 ## Overview
 
