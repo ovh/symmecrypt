@@ -73,30 +73,6 @@ type sealedKey struct {
 }
 
 /*
-** INIT
- */
-
-// InitDefaultKey initializes the symmecrypt default key singleton from the configstore
-func InitDefaultKey() error {
-	k, err := WatchKey(DefaultIdentifier)
-	if err != nil {
-		return err
-	}
-	symmecrypt.SetDefaultKey(k)
-	return nil
-}
-
-// InitDefaultRandom initializes the symmecrypt default key singleton with a random key.
-func InitDefaultRandom() error {
-	b, err := symmecrypt.NewRandomKey(DefaultCipher)
-	if err != nil {
-		return err
-	}
-	symmecrypt.SetDefaultKey(b)
-	return nil
-}
-
-/*
 ** CONFIG HELPERS
  */
 
