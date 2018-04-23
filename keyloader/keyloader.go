@@ -30,9 +30,6 @@ const (
 	// EncryptionKeyConfigName is the name of the config items representing encryption keys in configstore.
 	EncryptionKeyConfigName = "encryption-key"
 
-	// DefaultIdentifier is the identifier used when InitDefaultKey() is called. This key will be registered globally in the symmecrypt package.
-	DefaultIdentifier = "default"
-
 	// DefaultCipher is the cipher used by default if an empty ciper name is passed to GenerateKey().
 	DefaultCipher = aesgcm.CipherName
 )
