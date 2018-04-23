@@ -6,9 +6,6 @@ import (
 	"sync"
 )
 
-// Default key singleton
-var key Key
-
 // Key is an abstraction of a symmetrical encryption key
 // - Encrypt / Decrypt provide low-level data encryption, with extra data for MAC
 // - EncryptMarshal / DecryptMarshal build on top of that, working with a JSON representation of an object
@@ -90,20 +87,6 @@ func GetKeyFactory(name string) (KeyFactory, error) {
 		return nil, fmt.Errorf("unknown cipher '%s'", name)
 	}
 	return f, nil
-}
-
-/*
-** DEFAULT ENCRYPTION KEY
- */
-
-// SetDefaultKey sets the default singleton key
-func SetDefaultKey(b Key) {
-	key = b
-}
-
-// DefaultKey returns the default singleton key
-func DefaultKey() Key {
-	return key
 }
 
 /*
