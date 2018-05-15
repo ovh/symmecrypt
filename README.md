@@ -1,6 +1,6 @@
 # symmecrypt
 
-*symmecrypt* is a symmetrical encryption toolsuite.
+*symmecrypt* is a symmetric encryption toolsuite.
 It provides recommended implementations of crypto algorithms and facilities around configuration management
 and encryption key lifecycle.
 
@@ -9,7 +9,7 @@ and encryption key lifecycle.
 ## Overview
 
 * [*symmecrypt*](https://github.com/ovh/symmecrypt): Symmetrical encryption with MAC. Built-in cipher implementations provided, but extensible. Also provides a keyring mechanism for easy key rollover.
-* [*symmecrypt/seal*](https://github.com/ovh/symmecrypt/tree/master/seal): Encryption through a symmetrical key split in shards (shamir)
+* [*symmecrypt/seal*](https://github.com/ovh/symmecrypt/tree/master/seal): Encryption through a symmetric key split in shards (shamir)
 * [*symmecrypt/keyloader*](https://github.com/ovh/symmecrypt/tree/master/keyloader): Configuration manager that loads symmecrypt compatible keys from configuration, and supports key *seal* and *hot-reloading*.
 
 
@@ -45,7 +45,7 @@ and encryption key lifecycle.
 
 ## Key rollover
 
-It is important to be able to easily rollover keys when doing symmetrical encryption.
+It is important to be able to easily rollover keys when doing symmetric encryption.
 
 For that, one needs to be able to keep decrypting old ciphertexts using the old key,
 while encrypting new entries with a new, different key.
@@ -67,7 +67,7 @@ With this configuration, the previous example code would automatically instantia
 
 If you do not want to rely on the confidentiality of your configuration to protect your encryption keys, you can *seal* them.
 
-*symmecrypt/seal* provides encryption through a symmetrical key which is split in several shards (shamir algorithm). The number of existing shards and the minimum threshold needed to unlock the seal can be configured when first generating it.
+*symmecrypt/seal* provides encryption through a symmetric key which is split in several shards (shamir algorithm). The number of existing shards and the minimum threshold needed to unlock the seal can be configured when first generating it.
 
 *symmecrypt/keyloader* uses *symmecrypt/seal* to generate and load encryption keys which are themselves encrypted. This is controlled via the *sealed* boolean property in a key configuration.
 
@@ -133,7 +133,7 @@ With such a configuration, any of your previous ciphertexts can be read using yo
 
 ## Available ciphers
 
-*symmecrypt* provides built-in implementations of symmetrical authenticated ciphers:
+*symmecrypt* provides built-in implementations of symmetric authenticated ciphers:
 
 ### aes-gcm
 
