@@ -35,6 +35,8 @@ var (
 
 	decrypt       = app.Command("decrypt", "Decrypt data with selected key + cipher. Input is hex.")
 	decryptCipher = decrypt.Arg("cipher", "cipher to use").Default(DefaultCipher).Enum(ciphers...)
+
+	quiet = app.Flag("quiet", "no prompts").Bool()
 )
 
 func main() {
@@ -86,7 +88,12 @@ func main() {
 }
 
 func readSecret(msg string) string {
-	sec, err := gopass.GetPasswdPrompt(msg, true, os.Stdin, os.Stderr)
+	masked := true
+	if *quiet {
+		msg = ""
+		masked = false
+	}
+	sec, err := gopass.GetPasswdPrompt(msg, masked, os.Stdin, os.Stderr)
 	if len(sec) == 0 || err == gopass.ErrInterrupted {
 		os.Exit(0)
 	}
