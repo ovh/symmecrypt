@@ -4,18 +4,20 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/howeyc/gopass"
+	"gopkg.in/alecthomas/kingpin.v2"
+
 	"github.com/ovh/symmecrypt"
 	"github.com/ovh/symmecrypt/ciphers/aesgcm"
 	"github.com/ovh/symmecrypt/ciphers/aespmacsiv"
 	"github.com/ovh/symmecrypt/ciphers/chacha20poly1305"
 	"github.com/ovh/symmecrypt/ciphers/hmac"
 	"github.com/ovh/symmecrypt/keyloader"
-	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 var (
@@ -43,11 +45,11 @@ func main() {
 	case newEncryption.FullCommand():
 		key, err := keyloader.GenerateKey(*newEncryptionCipher, *newEncryptionIdentifier, false, time.Now())
 		if err != nil {
-			panic(err)
+			log.Fatalf("error: unable to generate key: %s", err)
 		}
 		j, err := json.Marshal(key)
 		if err != nil {
-			panic(err)
+			log.Fatalf("error: unable to generate key: %s", err)
 		}
 		fmt.Println(string(j))
 
@@ -55,12 +57,12 @@ func main() {
 		keyStr := readSecret("Encryption key: ")
 		k, err := symmecrypt.NewKey(*encryptCipher, keyStr)
 		if err != nil {
-			panic(err)
+			log.Fatalf("error: failed to instantiate key: %s", err)
 		}
 		dataStr := readSecret("Data to encrypt: ")
 		b, err := k.Encrypt([]byte(dataStr))
 		if err != nil {
-			panic(err)
+			log.Fatalf("error: failed to encrypt: %s", err)
 		}
 		fmt.Println(hex.EncodeToString(b))
 
@@ -68,16 +70,16 @@ func main() {
 		keyStr := readSecret("Encryption key: ")
 		k, err := symmecrypt.NewKey(*decryptCipher, keyStr)
 		if err != nil {
-			panic(err)
+			log.Fatalf("error: failed to instantiate key: %s", err)
 		}
 		dataStr := readSecret("hex data to decrypt: ")
 		dataRaw, err := hex.DecodeString(dataStr)
 		if err != nil {
-			panic(err)
+			log.Fatalf("error: failed to decode hex: %s", err)
 		}
 		b, err := k.Decrypt([]byte(dataRaw))
 		if err != nil {
-			panic(err)
+			log.Fatalf("error: failed to decrypt: %s", err)
 		}
 		fmt.Println(string(b))
 	}
@@ -89,7 +91,7 @@ func readSecret(msg string) string {
 		os.Exit(0)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		log.Fatalf("error: failed to read input: %s", err)
 	}
 	return string(sec)
 }
