@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-// Key is an abstraction of a symmetrical encryption key
+// Key is an abstraction of a symmetric encryption key
 // - Encrypt / Decrypt provide low-level data encryption, with extra data for MAC
 // - EncryptMarshal / DecryptMarshal build on top of that, working with a JSON representation of an object
 // - Wait blocks until the Key is ready to be used (noop for the default implementation, useful for keys that need to be activated somehow)
