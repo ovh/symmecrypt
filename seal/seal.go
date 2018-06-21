@@ -115,8 +115,11 @@ func Exists() bool {
 func NewSealFromConfig() (*Seal, error) {
 	sec, err := SealConfigFilter.GetItem(ConfigName)
 	if err != nil {
-		// Not found in config: disabled
-		return nil, nil
+		if _, ok := err.(configstore.ErrItemNotFound); ok {
+			// Not found in config: disabled
+			return nil, nil
+		}
+		return nil, err
 	}
 	i, err := sec.Unmarshaled()
 	if err != nil {
