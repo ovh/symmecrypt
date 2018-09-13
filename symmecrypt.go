@@ -1,8 +1,10 @@
 package symmecrypt
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 )
 
@@ -182,4 +184,96 @@ func (e ErrorKey) Wait() {
 // String returns the predefined error
 func (e ErrorKey) String() (string, error) {
 	return "", e.Error
+}
+
+type Writer struct {
+	k             Key
+	w             io.Writer
+	currentSecret []byte
+	extras        [][]byte
+}
+
+func NewWriter(w io.Writer, k Key, extra ...[]byte) *Writer {
+	return &Writer{
+		k:      k,
+		w:      w,
+		extras: extra,
+	}
+}
+
+func (sw *Writer) Flush() error {
+	// Encrypt the internal buffer
+	encData, err := sw.k.Encrypt(sw.currentSecret, sw.extras...)
+	if err != nil {
+		return err
+	}
+	n, err := sw.w.Write(encData)
+	switch {
+	case n != len(encData):
+		return fmt.Errorf("something went wrong during write to internal buffer")
+	case err != nil:
+		return err
+	}
+	// Dereference the clear data
+	sw.currentSecret = nil
+
+	return nil
+}
+
+func (sw *Writer) Write(b []byte) (int, error) {
+	// copy clear data in the internal buffer
+	// it will be encrypted on flush
+	destSlice := make([]byte, len(b)+len(sw.currentSecret))
+	if len(sw.currentSecret) > 0 {
+		copy(destSlice, sw.currentSecret)
+	}
+	copy(destSlice[len(sw.currentSecret):], b)
+	sw.currentSecret = destSlice
+	return len(b), nil
+}
+
+func (sw *Writer) Close() error {
+	return sw.Flush()
+}
+
+type Reader struct {
+	decBuffer io.Reader
+}
+
+func NewReader(r io.Reader, k Key, extra ...[]byte) (*Reader, error) {
+	reader := &Reader{}
+
+	// Read all the encrypted data in the internal buffer
+	var buffer bytes.Buffer
+	_, err := io.Copy(&buffer, r)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt allbuffer
+	decData, err := k.Decrypt(buffer.Bytes(), extra...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Instanciate a bytes reader
+	reader.decBuffer = bytes.NewReader(decData)
+
+	return reader, nil
+}
+
+func (sr *Reader) Read(b []byte) (int, error) {
+	// Do you try to read after OEF ?
+	if sr.decBuffer == nil {
+		return 0, io.ErrClosedPipe
+	}
+
+	n, err := sr.decBuffer.Read(b)
+
+	// If the buffer has reached EOF, dereferences it
+	if n == 0 || err != nil {
+		sr.decBuffer = nil
+	}
+
+	return n, err
 }
