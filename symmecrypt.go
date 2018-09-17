@@ -1,8 +1,10 @@
 package symmecrypt
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 )
 
@@ -182,4 +184,84 @@ func (e ErrorKey) Wait() {
 // String returns the predefined error
 func (e ErrorKey) String() (string, error) {
 	return "", e.Error
+}
+
+type writer struct {
+	k             Key
+	w             io.Writer
+	currentSecret bytes.Buffer
+	extras        [][]byte
+}
+
+// NewWriter instanciates an io.WriteCloser to help you encrypt while you write in a standard io.Writer.
+// Internally it stores in an internal buffer the content you want to encrypt. This internal is flushed, encrypted
+// and write to the targeted io.Writer on Close().
+func NewWriter(w io.Writer, k Key, extra ...[]byte) io.WriteCloser {
+	return &writer{
+		k:      k,
+		w:      w,
+		extras: extra,
+	}
+}
+
+// Close closes the writer. First it reads the internal buffer, then it encrypts its content.
+// Finally the encrypted content is written to the destination writer.
+// The error returned must be checked, you should not call Close on defer.
+// If the destication writer is also a io.Write
+func (sw *writer) Close() error {
+	// Encrypt the internal buffer
+	encData, err := sw.k.Encrypt(sw.currentSecret.Bytes(), sw.extras...)
+	if err != nil {
+		return err
+	}
+	// Write the encrypted bytes to the destination writer
+	n, err := sw.w.Write(encData)
+	switch {
+	case n != len(encData):
+		return errors.New("something went wrong during write to internal buffer")
+	case err != nil:
+		return err
+	}
+	// If the destication writer is a io.Closer: close it
+	c, ok := sw.w.(io.Closer)
+	if ok {
+		return c.Close()
+	}
+
+	return nil
+}
+
+// Write appends the contents of b to the internal buffer.
+// The returned value n is the length of p; err is always nil. If the
+// buffer becomes too large, Write will panic with ErrTooLarge.
+func (sw *writer) Write(b []byte) (int, error) {
+	// copy clear data in the internal buffer
+	// it will be encrypted on close
+	return sw.currentSecret.Write(b)
+}
+
+type reader struct {
+	*bytes.Buffer
+}
+
+// NewReader returns a new Reader which is able to decrypt the source io.Reader.
+// It returns an error if the source io.Reader is unreadable with the provided Key and extras.
+func NewReader(r io.Reader, k Key, extra ...[]byte) (io.Reader, error) {
+	// Read all the encrypted data in the internal buffer
+	var buffer bytes.Buffer
+	_, err := io.Copy(&buffer, r)
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt all the buffer
+	decData, err := k.Decrypt(buffer.Bytes(), extra...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Instanciate a bytes reader
+	reader := &reader{bytes.NewBuffer(decData)}
+
+	return reader, nil
 }
