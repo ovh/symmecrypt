@@ -1,7 +1,15 @@
 package symmecrypt_test
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"os"
+	"reflect"
 	"testing"
+
+	"github.com/pelletier/go-toml"
+	yaml "gopkg.in/yaml.v2"
 
 	"github.com/ovh/configstore"
 	"github.com/ovh/symmecrypt"
@@ -231,5 +239,155 @@ func TestCompositeKey(t *testing.T) {
 	_, err = kC.Decrypt(encr3)
 	if err == nil {
 		t.Fatal("successfully decrypted cipher+extra without using extra -> ERROR")
+	}
+}
+
+// TestWriterWithEncoders is about testing symmecrypt directly coupled with json, yaml and toml encoder/decoder
+func TestWriterWithEncoders(t *testing.T) {
+	// Load a global key
+	k, err := keyloader.LoadKey("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Define common interfaces to json, yaml, toml encoders and decoders
+	type encoder interface {
+		Encode(v interface{}) error
+	}
+	type decoder interface {
+		Decode(v interface{}) error
+	}
+
+	// Define testscases
+	var testcases = []struct {
+		data    interface{}
+		k       symmecrypt.Key
+		extras  [][]byte
+		encoder func(io.Writer) encoder
+		decoder func(io.Reader) decoder
+	}{
+		{
+			data: struct {
+				A string
+				B int
+				C bool
+			}{A: "A", B: 1, C: true},
+			k:      k,
+			extras: [][]byte{[]byte("aa"), []byte("bb")},
+			encoder: func(w io.Writer) encoder {
+				return yaml.NewEncoder(w)
+			},
+			decoder: func(r io.Reader) decoder {
+				return yaml.NewDecoder(r)
+			},
+		}, {
+			data: struct {
+				A string
+				B int
+				C bool
+			}{A: "A", B: 1, C: true},
+			k:      k,
+			extras: [][]byte{[]byte("aa"), []byte("bb")},
+			encoder: func(w io.Writer) encoder {
+				return json.NewEncoder(w)
+			},
+			decoder: func(r io.Reader) decoder {
+				return json.NewDecoder(r)
+			},
+		}, {
+			data: struct {
+				A string
+				B int
+				C bool
+			}{A: "AA", B: 11, C: false},
+			k:      k,
+			extras: [][]byte{[]byte("aa"), []byte("bb")},
+			encoder: func(w io.Writer) encoder {
+				return toml.NewEncoder(w)
+			},
+			decoder: func(r io.Reader) decoder {
+				return toml.NewDecoder(r)
+			},
+		},
+	}
+
+	// Run the testcases
+	for _, tt := range testcases {
+		var writeBuf bytes.Buffer
+		// Instanciate a writer and an encoder
+		w := symmecrypt.NewWriter(&writeBuf, tt.k, tt.extras...)
+		enc := tt.encoder(w)
+		// Encode
+		if err := enc.Encode(tt.data); err != nil {
+			t.Fatal(err)
+		}
+		// Close (flush)
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		// Instanciate a reader and an decoder
+		r, err := symmecrypt.NewReader(&writeBuf, k, tt.extras...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dec := tt.decoder(r)
+
+		var actual struct {
+			A string
+			B int
+			C bool
+		}
+
+		// Decode
+		if err := dec.Decode(&actual); err != nil {
+			t.Fatal(err)
+		}
+
+		// Check
+		if !reflect.DeepEqual(tt.data, actual) {
+			t.Fatalf("expected: %+v but got %+v", tt.data, actual)
+		}
+	}
+}
+
+func ExampleNewWriter() {
+	k, err := keyloader.LoadKey("test")
+	if err != nil {
+		panic(err)
+	}
+
+	w := symmecrypt.NewWriter(os.Stdout, k)
+
+	_, err = w.Write([]byte("secret content"))
+	if err != nil {
+		panic(err)
+	}
+
+	err = w.Close()
+	if err != nil {
+		panic(err)
+	}
+}
+
+func ExampleNewReader() {
+	k, err := keyloader.LoadKey("test")
+	if err != nil {
+		panic(err)
+	}
+
+	encryptedContent, err := k.Encrypt([]byte("secret content"))
+	if err != nil {
+		panic(err)
+	}
+
+	src := bytes.NewReader(encryptedContent)
+	reader, err := symmecrypt.NewReader(src, k)
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = io.Copy(os.Stdout, reader)
+	if err != nil {
+		panic(err)
 	}
 }
