@@ -32,10 +32,10 @@ var (
 	app = kingpin.New("symmecrypt", fmt.Sprintf(`A command-line utility tied to the symmecrypt library (https://github.com/ovh/symmecrypt). Generate new keys, and encrypt/decrypt arbitrary data.
 	Available ciphers: %s (default: %s).
 	For encrypt/decrypt, encryption keys are expected as a comma-separated list of base64-encoded keys in the environment variable ENCRYPTION_KEY_BASE64.
-	Identifiers can optionally be specified to choose which key to use, and in case several revisions of the same key identifier are present, normal fallback/priority rules are applied using timestamps, as specified in https://github.com/ovh/symmecrypt
+	Key identifiers can optionally be specified to choose which key to use, and in case several revisions of the same key identifier are present in the environment variable, normal fallback/priority rules are applied using timestamps, as specified in the documentation (https://github.com/ovh/symmecrypt).
 
 Example:
-	$ export ENCRYPTION_KEY_BASE64=$(symmecrypt new foobar aes-gcm --base64)
+	$ export ENCRYPTION_KEY_BASE64=$(symmecrypt new aes-gcm --base64)
 	$ symmecrypt encrypt <<EOF >test.encrypted
 	foo
 	bar
@@ -48,19 +48,18 @@ Example:
 	bar
 	baz
 `, strings.Join(ciphers, ", "), DefaultCipher))
-	useBase64 = app.Flag("base64", "Use base64 encoding for input/output.").Default("false").Bool()
 
-	newEncryption           = app.Command("new", "Generate a new random encryption key.")
-	newEncryptionIdentifier = newEncryption.Arg("identifier", "Identifier for the key").Required().String()
-	newEncryptionCipher     = newEncryption.Arg("cipher", "Cipher for the key").Default(DefaultCipher).Enum(ciphers...)
+	useBase64     = app.Flag("base64", "Use base64 encoding for input/output.").Default("false").Bool()
+	keyIdentifier = app.Flag("key", "Specify the identifier of the encryption key").String()
 
-	encrypt           = app.Command("encrypt", "Encrypt arbitrary data from STDIN. The output will be the encrypted data.")
-	encryptIdentifier = encrypt.Arg("identifier", "Identifier of the encryption key to use").String()
-	encryptExtra      = encrypt.Flag("extra", "Extra metadata for MAC (decryption will fail unless the same extra data is passed when decrypting).").Strings()
+	newEncryption       = app.Command("new", "Generate a new random encryption key.")
+	newEncryptionCipher = newEncryption.Arg("cipher", "Cipher for the key").Default(DefaultCipher).Enum(ciphers...)
 
-	decrypt           = app.Command("decrypt", "Decrypt data from STDIN. The output will be the plain data.")
-	decryptIdentifier = decrypt.Arg("identifier", "Identifier of the encryption key to use").String()
-	decryptExtra      = decrypt.Flag("extra", "Extra metadata for MAC (decryption will fail unless the same extra data that was used when encrypting is passed).").Strings()
+	encrypt      = app.Command("encrypt", "Encrypt arbitrary data from STDIN. The output will be the encrypted data.")
+	encryptExtra = encrypt.Flag("extra", "Extra metadata for MAC (decryption will fail unless the same extra data is passed when decrypting).").Strings()
+
+	decrypt      = app.Command("decrypt", "Decrypt data from STDIN. The output will be the plain data.")
+	decryptExtra = decrypt.Flag("extra", "Extra metadata for MAC (decryption will fail unless the same extra data that was used when encrypting is passed).").Strings()
 )
 
 func readKey() error {
@@ -91,7 +90,10 @@ func main() {
 
 	switch cmd {
 	case newEncryption.FullCommand():
-		key, err := keyloader.GenerateKey(*newEncryptionCipher, *newEncryptionIdentifier, false, time.Now())
+		if *keyIdentifier == "" {
+			*keyIdentifier = "default"
+		}
+		key, err := keyloader.GenerateKey(*newEncryptionCipher, *keyIdentifier, false, time.Now())
 		if err != nil {
 			log.Fatalf("error: unable to generate key: %s", err)
 		}
@@ -103,7 +105,7 @@ func main() {
 		if *useBase64 {
 			newKey = base64.StdEncoding.EncodeToString([]byte(newKey))
 		}
-		fmt.Print(newKey)
+		fmt.Println(newKey)
 
 	case encrypt.FullCommand():
 		err := readKey()
@@ -111,8 +113,8 @@ func main() {
 			log.Fatal(err)
 		}
 		var k symmecrypt.Key
-		if *encryptIdentifier != "" {
-			k, err = keyloader.LoadKey(*encryptIdentifier)
+		if *keyIdentifier != "" {
+			k, err = keyloader.LoadKey(*keyIdentifier)
 		} else {
 			k, err = keyloader.LoadSingleKey()
 		}
@@ -140,8 +142,8 @@ func main() {
 			log.Fatal(err)
 		}
 		var k symmecrypt.Key
-		if *decryptIdentifier != "" {
-			k, err = keyloader.LoadKey(*decryptIdentifier)
+		if *keyIdentifier != "" {
+			k, err = keyloader.LoadKey(*keyIdentifier)
 		} else {
 			k, err = keyloader.LoadSingleKey()
 		}
