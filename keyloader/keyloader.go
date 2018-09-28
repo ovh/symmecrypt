@@ -276,6 +276,33 @@ func LoadKey(identifier string) (symmecrypt.Key, error) {
 	return comp, nil
 }
 
+// LoadSingleKey instantiates a new encryption key using LoadKey from the configstore without specifying its identifier.
+// It will error if several different identifiers are found.
+func LoadSingleKey() (symmecrypt.Key, error) {
+	ident, err := singleKeyIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	return LoadKey(ident)
+}
+
+func singleKeyIdentifier() (string, error) {
+	items, err := ConfigFilter.GetItemList()
+	if err != nil {
+		return "", err
+	}
+
+	keys := items.Keys()
+	switch len(keys) {
+	case 0:
+		return "", errors.New("no encryption key found")
+	case 1:
+		return keys[0], nil
+	}
+
+	return "", errors.New("ambiguous config: several encryption keys found and no identifier supplied")
+}
+
 // WatchKey instantiates a new hot-reloading encryption key from the configstore.
 // It uses LoadKey(), so the underlying implementation can be anything supported (composite, sealed, any cipher, ...)
 func WatchKey(identifier string) (symmecrypt.Key, error) {
@@ -288,6 +315,16 @@ func WatchKey(identifier string) (symmecrypt.Key, error) {
 	go holder.watch()
 
 	return holder, nil
+}
+
+// WatchSingleKey instantiates a new hot-relating encryption key from the configstore without specifying its identifier.
+// It will error if several different identifiers are found.
+func WatchSingleKey() (symmecrypt.Key, error) {
+	ident, err := singleKeyIdentifier()
+	if err != nil {
+		return nil, err
+	}
+	return WatchKey(ident)
 }
 
 /*
