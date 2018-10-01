@@ -180,3 +180,39 @@ Robust | Fast | Proven
 **/!\ DOES NOT GUARANTEE CONFIDENTIALITY.**
 
 HMAC-sha512 for authentication only. Note: if the input consists only of printable characters, so will the output.
+
+## Command-line tool
+
+A command-line tool is available as a companion to the library ([source](https://github.com/ovh/symmecrypt/tree/master/cmd/symmecrypt)).
+
+It can be used to generate new random encryption keys for any of the built-in symmecrypt ciphers, and to encrypt/decrypt arbitrary data.
+
+### Example (new key)
+```bash
+    $ symmecrypt new aes-gcm --key=storage_key
+    {"identifier":"storage_key","cipher":"aes-gcm","timestamp":1538383069,"key":"46ca74bf7a980ffbfdeea5a66593f7a8f12039f872694015e66c44b652165ee4"}
+```
+
+### Example (file)
+```bash
+    $ export ENCRYPTION_KEY_BASE64=$(symmecrypt new aes-gcm --base64)
+    $ symmecrypt encrypt <<EOF >test.encrypted
+    foo
+    bar
+    baz
+    EOF
+    $ cat -e test.encrypted
+    ^^JDM-1^EM-$M-^K1nX;^WM-^HC6^Xw^?^BM-.M-p^[M-%=^M-^ZM-uM-%M-2^H6M-sM-NM-FM-^H^RM-]g^_&$
+    $ symmecrypt decrypt <test.encrypted
+    foo
+    bar
+    baz
+```
+
+### Example (script)
+
+```bash
+    export ENCRYPTION_KEY_BASE64=$(symmecrypt new aes-gcm --base64)
+    ENCRYPTED=$(echo foo bar baz | symmecrypt encrypt --base64)
+    PLAIN=$(echo $ENCRYPTED | symmecrypt decrypt --base64)
+```
