@@ -3,7 +3,7 @@ package aespmacsiv
 import (
 	"crypto/cipher"
 
-	miscreant "github.com/miscreant/miscreant/go"
+	miscreant "github.com/miscreant/miscreant-go"
 	"github.com/ovh/symmecrypt"
 	"github.com/ovh/symmecrypt/symutils"
 )
