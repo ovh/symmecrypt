@@ -19,7 +19,8 @@ const (
 )
 
 func init() {
-	symmecrypt.RegisterCipher(CipherName, symutils.NewFactoryAEAD(KeyLen, newAEAD))
+	symmecrypt.RegisterCipher(CipherName, symutils.NewFactoryAEADMutex(KeyLen, newAEAD))
+	// use mutex factory, miscreant implementation does not seem concurrent safe (internal state)
 }
 
 func newAEAD(b []byte) (cipher.AEAD, error) {
