@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/ovh/symmecrypt"
 )
@@ -53,6 +54,7 @@ func Random(keyLen int) ([]byte, error) {
 type factoryAEAD struct {
 	cipherFactory func([]byte) (cipher.AEAD, error)
 	keyLen        int
+	mutex         bool
 }
 
 // NewFactoryAEAD returns a symmecrypt.KeyFactory that can be registered to symmecrypt.RegisterCipher.
@@ -62,12 +64,30 @@ func NewFactoryAEAD(keyLen int, cipherFactory func([]byte) (cipher.AEAD, error))
 	return &factoryAEAD{keyLen: keyLen, cipherFactory: cipherFactory}
 }
 
+func NewFactoryAEADMutex(keyLen int, cipherFactory func([]byte) (cipher.AEAD, error)) symmecrypt.KeyFactory {
+	return &factoryAEAD{keyLen: keyLen, cipherFactory: cipherFactory, mutex: true}
+}
+
 func (f *factoryAEAD) NewKey(s string) (symmecrypt.Key, error) {
-	return NewKeyAEAD([]byte(s), f.keyLen, f.cipherFactory)
+	k, err := NewKeyAEAD([]byte(s), f.keyLen, f.cipherFactory)
+	if err != nil {
+		return nil, err
+	}
+	if f.mutex {
+		k = &KeyMutex{Key: k}
+	}
+	return k, nil
 }
 
 func (f *factoryAEAD) NewRandomKey() (symmecrypt.Key, error) {
-	return NewRandomKeyAEAD(f.keyLen, f.cipherFactory)
+	k, err := NewRandomKeyAEAD(f.keyLen, f.cipherFactory)
+	if err != nil {
+		return nil, err
+	}
+	if f.mutex {
+		k = &KeyMutex{Key: k}
+	}
+	return k, nil
 }
 
 // KeyAEAD is a base implementation of a symmecrypt key that uses AEAD ciphers.
@@ -183,4 +203,52 @@ func (b KeyAEAD) Wait() {
 // String returns a hex encoded representation of the key
 func (b KeyAEAD) String() (string, error) {
 	return hex.EncodeToString(b.key), nil
+}
+
+// KeyMutex wraps a symmecrypt Key with a mutex to protect unsafe concurrent implementations
+type KeyMutex struct {
+	Key symmecrypt.Key
+	mut sync.Mutex
+}
+
+func (k *KeyMutex) Encrypt(text []byte, extra ...[]byte) ([]byte, error) {
+	k.mut.Lock()
+	defer k.mut.Unlock()
+
+	return k.Key.Encrypt(text, extra...)
+}
+
+func (k *KeyMutex) Decrypt(text []byte, extra ...[]byte) ([]byte, error) {
+	k.mut.Lock()
+	defer k.mut.Unlock()
+
+	return k.Key.Decrypt(text, extra...)
+}
+
+func (k *KeyMutex) EncryptMarshal(i interface{}, extra ...[]byte) (string, error) {
+	k.mut.Lock()
+	defer k.mut.Unlock()
+
+	return k.Key.EncryptMarshal(i, extra...)
+}
+
+func (k *KeyMutex) DecryptMarshal(s string, target interface{}, extra ...[]byte) error {
+	k.mut.Lock()
+	defer k.mut.Unlock()
+
+	return k.Key.DecryptMarshal(s, target, extra...)
+}
+
+func (k *KeyMutex) Wait() {
+	k.mut.Lock()
+	defer k.mut.Unlock()
+
+	k.Key.Wait()
+}
+
+func (k *KeyMutex) String() (string, error) {
+	k.mut.Lock()
+	defer k.mut.Unlock()
+
+	return k.Key.String()
 }
