@@ -17,6 +17,7 @@ import (
 	"github.com/ovh/symmecrypt/ciphers/aesgcm"
 	"github.com/ovh/symmecrypt/ciphers/aespmacsiv"
 	"github.com/ovh/symmecrypt/ciphers/chacha20poly1305"
+	"github.com/ovh/symmecrypt/ciphers/xchacha20poly1305"
 	"github.com/ovh/symmecrypt/ciphers/hmac"
 	"github.com/ovh/symmecrypt/keyloader"
 )
@@ -27,7 +28,7 @@ const (
 
 var (
 	DefaultCipher = aesgcm.CipherName
-	ciphers       = []string{aesgcm.CipherName, chacha20poly1305.CipherName, aespmacsiv.CipherName, hmac.CipherName}
+	ciphers       = []string{aesgcm.CipherName, chacha20poly1305.CipherName, xchacha20poly1305.CipherName, aespmacsiv.CipherName, hmac.CipherName}
 
 	app = kingpin.New("symmecrypt", fmt.Sprintf(`A command-line utility tied to the symmecrypt library (https://github.com/ovh/symmecrypt). Generate new keys, and encrypt/decrypt arbitrary data.
 	Available ciphers: %s (default: %s).

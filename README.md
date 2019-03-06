@@ -143,7 +143,7 @@ Robust | Fast | Proven
 
 [AES Galois/Counter mode](https://csrc.nist.gov/publications/detail/sp/800-38d/final) (256bits), with built-in authentication.
 
-**/!\ Nonces are randomly generated and should not be repeated with *aes-gcm*, remember to rollover your key on a regular basis.**
+:exclamation: **Nonces are randomly generated and should not be repeated with *aes-gcm*, remember to rollover your key on a regular basis. Nonce size is 96 bits, which is not ideal for random generation due to the risk of collision, prefer *xchacha20-poly1305*.**
 
 ### chacha20-poly1305
 
@@ -153,7 +153,18 @@ Robust | Fast | Proven
 
 [ChaCha20-Poly1305](https://tools.ietf.org/html/rfc7539), with built-in authentication.
 
-**/!\ Nonces are randomly generated and should not be repeated with *chacha20-poly1305*, remember to rollover your key on a regular basis.**
+:exclamation: **Nonces are randomly generated and should not be repeated with *chacha20-poly1305*, remember to rollover your key on a regular basis. Nonce size is 96 bits, which is not ideal for random generation due to the risk of collision, prefer *xchacha20-poly1305*.**
+
+
+### xchacha20-poly1305
+
+Robust | Fast | Proven
+--- | --- | ---
+:star::star::star: | :star::star::star: | :star::star:
+
+Variant of [ChaCha20-Poly1305](https://tools.ietf.org/html/rfc7539) with extended nonce, with built-in authentication.
+
+:exclamation: **Nonces are randomly generated and should not be repeated with *xchacha20-poly1305*, remember to rollover your key on a regular basis. Nonce size is 192 bits, which is acceptable for random generation.**
 
 ### aes-pmac-siv
 
@@ -163,9 +174,9 @@ Robust | Fast | Proven
 
 Parallelized implementation of [AES-SIV](https://tools.ietf.org/html/rfc5297) (256 bits), with built-in authentication.
 
-**/!\ This cipher is still young, use with caution**
+:exclamation: **This cipher is still young, use with caution.**
 
-**/!\ This is one of the rare ciphers which is not weak to nonce reuse**
+:exclamation: **This is one of the rare ciphers which is not weak to nonce reuse.**
 
 More information:
 * [AES-PMAC-SIV](https://github.com/miscreant/miscreant/wiki/AES-PMAC-SIV)
@@ -177,7 +188,7 @@ Robust | Fast | Proven
 --- | --- | ---
 :star::star::star: | :star::star::star: | :star::star::star:
 
-**/!\ DOES NOT GUARANTEE CONFIDENTIALITY.**
+:exclamation: **DOES NOT GUARANTEE CONFIDENTIALITY.**
 
 HMAC-sha512 for authentication only. Note: if the input consists only of printable characters, so will the output.
 
