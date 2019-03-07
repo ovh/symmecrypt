@@ -14,10 +14,13 @@ import (
 	"github.com/sirupsen/logrus"
 
 	// aes-gcm cipher
-	"github.com/ovh/symmecrypt/ciphers/aesgcm"
+	_ "github.com/ovh/symmecrypt/ciphers/aesgcm"
 
 	// chacha20-poly1305 cipher
 	_ "github.com/ovh/symmecrypt/ciphers/chacha20poly1305"
+
+	// xchacha20-poly1305 cipher
+	"github.com/ovh/symmecrypt/ciphers/xchacha20poly1305"
 
 	// aes-pmac-siv cipher
 	_ "github.com/ovh/symmecrypt/ciphers/aespmacsiv"
@@ -31,7 +34,7 @@ const (
 	EncryptionKeyConfigName = "encryption-key"
 
 	// DefaultCipher is the cipher used by default if an empty ciper name is passed to GenerateKey().
-	DefaultCipher = aesgcm.CipherName
+	DefaultCipher = xchacha20poly1305.CipherName
 )
 
 var (
