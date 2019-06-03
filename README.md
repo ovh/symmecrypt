@@ -42,6 +42,35 @@ and encryption key lifecycle.
     fmt.Println(string(decrypted))
 ```
 
+## Configuration format
+
+Package `configstore` is used for sourcing and managing key configuration values.
+
+```go
+    // before loading a key by its identifier, package `configstore` needs to
+    // be configured so it knows about possible configuration sources
+    //
+    // this would load keys from a file named "key.txt" that contains a key with
+    // the identifier "storage":
+    configstore.File("key.txt")
+    // more options can be found here: https://github.com/ovh/configstore
+    k, err := keyloader.LoadKey("storage")
+```
+
+`symmecrypt` looks for items in the config store that are of key `encryption-key`, its value is expected to be a JSON string containing the key itself.
+
+If loading from a text file this would look like:
+
+```
+- key: encryption-key
+  value: '{"identifier":"storage","cipher":"aes-gcm","timestamp":1559309532,"key":"b6a942c0c0c75cc87f37d9e880c440ac124e040f263611d9d236b8ed92e35521"}'
+```
+
+or when done in code:
+
+```go
+  item := configstore.NewItem("encryption-key", `{"identifier":"storage","cipher":"aes-gcm","timestamp":1559309532,"key":"b6a942c0c0c75cc87f37d9e880c440ac124e040f263611d9d236b8ed92e35521"}`, 0)
+```
 
 ## Key rollover
 
