@@ -17,8 +17,8 @@ import (
 	"github.com/ovh/symmecrypt/ciphers/aesgcm"
 	"github.com/ovh/symmecrypt/ciphers/aespmacsiv"
 	"github.com/ovh/symmecrypt/ciphers/chacha20poly1305"
-	"github.com/ovh/symmecrypt/ciphers/xchacha20poly1305"
 	"github.com/ovh/symmecrypt/ciphers/hmac"
+	"github.com/ovh/symmecrypt/ciphers/xchacha20poly1305"
 	"github.com/ovh/symmecrypt/keyloader"
 )
 
