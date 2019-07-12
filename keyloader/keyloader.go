@@ -354,13 +354,13 @@ func WatchKeyFromStore(identifier string, store *configstore.Store) (symmecrypt.
 	return holder, nil
 }
 
-// WatchSingleKey instantiates a new hot-relating encryption key from the default store in configstore without specifying its identifier.
+// WatchSingleKey instantiates a new hot-reloading encryption key from the default store in configstore without specifying its identifier.
 // It will error if several different identifiers are found.
 func WatchSingleKey() (symmecrypt.Key, error) {
 	return WatchSingleKeyFromStore(configstore.DefaultStore)
 }
 
-// WatchSingleKey instantiates a new hot-relating encryption key from a specific store instance without specifying its identifier.
+// WatchSingleKey instantiates a new hot-reloading encryption key from a specific store instance without specifying its identifier.
 // It will error if several different identifiers are found.
 func WatchSingleKeyFromStore(store *configstore.Store) (symmecrypt.Key, error) {
 	ident, err := singleKeyIdentifier(store)
