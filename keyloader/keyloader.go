@@ -66,7 +66,6 @@ type watchKey struct {
 
 // A sealedKey is an implementation of an encryption key that is encrypted using symmecrypt/seal.
 type sealedKey struct {
-	encryptedKey string
 	decryptedKey symmecrypt.Key
 	decrypted    uint32
 	waitCh       chan struct{}
