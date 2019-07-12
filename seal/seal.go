@@ -56,11 +56,11 @@ type internalKey struct {
 
 // InitFromConfig initializes the global singleton seal from the configstore.
 func InitFromConfig(onChange func(*Seal)) error {
-	return InitFromStore(configstore.DefaultStore, onChange)
+	return InitFromStore(onChange, configstore.DefaultStore)
 }
 
 // InitFromStore initializes the global singleton seal from a specific store instance.
-func InitFromStore(s *configstore.Store, onChange func(*Seal)) error {
+func InitFromStore(onChange func(*Seal), s *configstore.Store) error {
 	seal, err := NewSealFromStore(s)
 	if err != nil {
 		return err
