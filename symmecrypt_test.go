@@ -43,7 +43,7 @@ func TestMain(m *testing.M) {
 
 	configstore.RegisterProvider("test", ProviderTest)
 
-	m.Run()
+	os.Exit(m.Run())
 }
 
 func TestEncryptDecrypt(t *testing.T) {
