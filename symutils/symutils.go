@@ -1,6 +1,7 @@
 package symutils
 
 import (
+	"bytes"
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
@@ -202,7 +203,9 @@ func (b KeyAEAD) DecryptMarshal(s string, target interface{}, extra ...[]byte) e
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(unciphered, target)
+	dec := json.NewDecoder(bytes.NewReader(unciphered))
+	dec.UseNumber()
+	return dec.Decode(target)
 }
 
 // Wait is a noop for regular implementations: the key is always ready
