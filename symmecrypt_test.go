@@ -3,6 +3,7 @@ package symmecrypt_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"reflect"
@@ -102,8 +103,9 @@ func TestEncryptDecrypt(t *testing.T) {
 }
 
 type testObfuscate struct {
-	Name   string
-	Amount int
+	Name            string
+	Amount          int
+	InterfaceNumber interface{}
 }
 
 func TestEncryptDecryptMarshal(t *testing.T) {
@@ -114,8 +116,9 @@ func TestEncryptDecryptMarshal(t *testing.T) {
 	}
 
 	origin := &testObfuscate{
-		Name:   "test",
-		Amount: 10,
+		Name:            "test",
+		Amount:          10,
+		InterfaceNumber: 2345678954,
 	}
 
 	extra := []byte("aa")
@@ -149,11 +152,11 @@ func TestEncryptDecryptMarshal(t *testing.T) {
 		t.Fatal("succerssfully decrypted cipher without using extra data -> ERROR")
 	}
 
-	if target.Name != origin.Name || target.Amount != origin.Amount {
-		t.Errorf("Not same deobfuscated result %s, %d", target.Name, target.Amount)
+	if target.Name != origin.Name || target.Amount != origin.Amount || fmt.Sprint(origin.InterfaceNumber) != fmt.Sprint(target.InterfaceNumber) {
+		t.Errorf("Not same deobfuscated result %s, %d, %v", target.Name, target.Amount, target.InterfaceNumber)
 	}
-	if targetExtra.Name != origin.Name || targetExtra.Amount != origin.Amount {
-		t.Errorf("Not same deobfuscated result %s, %d", targetExtra.Name, targetExtra.Amount)
+	if targetExtra.Name != origin.Name || targetExtra.Amount != origin.Amount || fmt.Sprint(origin.InterfaceNumber) != fmt.Sprint(targetExtra.InterfaceNumber) {
+		t.Errorf("Not same deobfuscated result %s, %d, %v", targetExtra.Name, targetExtra.Amount, targetExtra.InterfaceNumber)
 	}
 }
 
