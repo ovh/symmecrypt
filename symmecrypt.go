@@ -2,11 +2,15 @@ package symmecrypt
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 )
+
+var LogErrorFunc = log.Println
 
 // Key is an abstraction of a symmetric encryption key
 // - Encrypt / Decrypt provide low-level data encryption, with extra data for MAC
@@ -25,6 +29,7 @@ type Key interface {
 type KeyFactory interface {
 	NewKey(string) (Key, error)
 	NewRandomKey() (Key, error)
+	NewConvergentKey(string) (Key, error)
 }
 
 // CompositeKey provides a keyring mechanism: encrypt with first, decrypt with _any_
@@ -38,7 +43,6 @@ type ErrorKey struct {
 /*
 ** KEY TYPES (factory)
  */
-
 var (
 	factories    = map[string]KeyFactory{}
 	factoriesMut sync.Mutex
@@ -241,7 +245,17 @@ func (sw *writer) Write(b []byte) (int, error) {
 }
 
 type reader struct {
-	*bytes.Buffer
+	io.Reader
+}
+
+func newReaderBuf(buf []byte, k Key, extra ...[]byte) (io.Reader, error) {
+	decData, err := k.Decrypt(buf, extra...)
+	if err != nil {
+		return nil, err
+	}
+	// Instanciate a bytes reader
+	reader := &reader{bytes.NewReader(decData)}
+	return reader, nil
 }
 
 // NewReader returns a new Reader which is able to decrypt the source io.Reader.
@@ -253,15 +267,178 @@ func NewReader(r io.Reader, k Key, extra ...[]byte) (io.Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	// Decrypt all the buffer
-	decData, err := k.Decrypt(buffer.Bytes(), extra...)
+	btes := buffer.Bytes()
+	return newReaderBuf(btes, k, extra...)
+}
+
+var _ io.Writer = new(chunksWriter)
+
+type chunksWriter struct {
+	destination              io.Writer
+	k                        Key
+	extras                   [][]byte
+	chunkSize                int
+	currentChunkWriter       *bytes.Buffer
+	currentChunkBytesWritten int
+}
+
+func (w *chunksWriter) encryptCurrentChunk() (int, error) {
+	currentChunk := w.currentChunkWriter.Bytes()
+	// first step: encrypt the chunks
+	var encChunk bytes.Buffer
+	encWriter := NewWriter(&encChunk, w.k, w.extras...).(*writer)
+	n, err := encWriter.Write(currentChunk)
 	if err != nil {
-		return nil, err
+		return n, err
 	}
 
-	// Instanciate a bytes reader
-	reader := &reader{bytes.NewBuffer(decData)}
+	// call close to effectivelly encrypt all the things
+	if err := encWriter.Close(); err != nil {
+		return n, err
+	}
 
-	return reader, nil
+	// get the encrypted content
+	btes := encChunk.Bytes()
+
+	// then write into the destination writer the len of the encrypted chunks
+	headerBuf := make([]byte, binary.MaxVarintLen64)
+	binary.PutVarint(headerBuf, int64(len(btes)))
+	if _, err := w.destination.Write(headerBuf); err != nil {
+		return n, err
+	}
+
+	// then write into the desitination writer the encrypted chunks
+	_, err = w.destination.Write(btes)
+
+	// finally reset the current chunk
+	w.currentChunkBytesWritten = 0
+	w.currentChunkWriter = nil
+
+	return n, err
+}
+
+func (w *chunksWriter) Write(p []byte) (int, error) {
+	if w.currentChunkWriter == nil {
+		w.currentChunkWriter = new(bytes.Buffer)
+		w.currentChunkBytesWritten = 0
+	}
+
+	if w.currentChunkBytesWritten == w.chunkSize {
+		return w.encryptCurrentChunk()
+	}
+
+	if w.currentChunkBytesWritten+len(p) <= w.chunkSize {
+		n, err := w.currentChunkWriter.Write(p)
+		if err != nil {
+			return int(n), err
+		}
+		w.currentChunkBytesWritten += int(n)
+		return w.encryptCurrentChunk()
+	}
+
+	x := w.chunkSize - w.currentChunkBytesWritten
+	p1 := p[:x]
+	p2 := p[x:]
+
+	x, err := w.Write(p1)
+	if err != nil {
+		return x, err
+	}
+
+	y, err := w.Write(p2)
+	return x + y, err
+}
+
+func NewChunksWriter(w io.Writer, k Key, chunkSize int, extras ...[]byte) io.Writer {
+	var cw = chunksWriter{
+		chunkSize:   chunkSize,
+		destination: w,
+		k:           k,
+		extras:      extras,
+	}
+	return &cw
+}
+
+var _ io.Reader = new(chunksReader)
+
+type chunksReader struct {
+	src                   io.Reader
+	k                     Key
+	extras                [][]byte
+	chunkSize             int
+	currentChunk          io.Reader
+	currentChunkReadBytes int
+}
+
+func NewChunksReader(r io.Reader, k Key, chunkSize int, extras ...[]byte) io.Reader {
+	var cr = chunksReader{
+		src:       r,
+		k:         k,
+		extras:    extras,
+		chunkSize: chunkSize,
+	}
+	return &cr
+}
+
+func (r *chunksReader) readNewChunk() error {
+	// read the chunksize
+	headerBtes := make([]byte, binary.MaxVarintLen64)
+	if _, err := r.src.Read(headerBtes); err != nil { // READING THE CLEAR HEADER FROM THE ENCRYPTED SOURCE
+		return err
+	}
+
+	n, err := binary.ReadVarint(bytes.NewReader(headerBtes)) // READ THE HEADER BUFFER
+	if err != nil {
+		return err
+	}
+
+	// read the chunk content
+	btes := make([]byte, n)
+	_, err = r.src.Read(btes)
+	if err != nil && err != io.EOF {
+		return err
+	}
+
+	kr, err := newReaderBuf(btes, r.k, r.extras...) // PREPARE THE CLEAR BUFFER OF THE CHUNK CONTENT
+	if err != nil {
+		return err
+	}
+
+	r.currentChunk = kr
+	r.currentChunkReadBytes = 0
+	return nil
+}
+
+func (r *chunksReader) Read(p []byte) (int, error) {
+	if r.currentChunk == nil {
+		if err := r.readNewChunk(); err != nil {
+			return 0, err
+		}
+	}
+
+	if len(p)+r.currentChunkReadBytes > r.chunkSize {
+		// The first part of 'p' will store the current chunk
+		p1 := p[:r.chunkSize-r.currentChunkReadBytes]
+		// The last part of 'p' will store the next chunk
+		p2 := p[r.chunkSize-r.currentChunkReadBytes:]
+
+		n, err := r.currentChunk.Read(p1)
+		r.currentChunkReadBytes += n
+		if err != nil {
+			return n, err
+		}
+
+		if err := r.readNewChunk(); err != nil {
+			return n, err
+		}
+
+		m, err := r.Read(p2)
+		r.currentChunkReadBytes += m
+		return n + m, err
+	}
+
+	n, err := r.currentChunk.Read(p)
+	r.currentChunkReadBytes += n
+	return n, err
 }

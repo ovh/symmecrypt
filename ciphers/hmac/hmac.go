@@ -50,6 +50,10 @@ func (f hmacFactory) NewRandomKey() (symmecrypt.Key, error) {
 	return Key(b), nil
 }
 
+func (f hmacFactory) NewConvergentKey(string) (symmecrypt.Key, error) {
+	return nil, errors.New("convergent key not supported by this factory")
+}
+
 // Key is a simple key which uses plain data + HMAC-sha512 for authentication
 type Key []byte
 

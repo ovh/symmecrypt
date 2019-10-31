@@ -12,7 +12,6 @@ import (
 	"github.com/ovh/configstore"
 	"github.com/ovh/symmecrypt"
 	"github.com/ovh/symmecrypt/ciphers/aesgcm"
-	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -73,7 +72,7 @@ func InitFromStore(onChange func(*Seal), s *configstore.Store) error {
 		for range s.Watch() {
 			newSeal, err := NewSealFromStore(s)
 			if err != nil {
-				logrus.Errorf("symmecrypt/seal: configuration fetch error: %s", err)
+				symmecrypt.LogErrorFunc("symmecrypt/seal: configuration fetch error: %s", err)
 				continue
 			}
 			if diff(seal, newSeal) && onChange != nil {

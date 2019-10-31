@@ -5,6 +5,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -100,6 +101,21 @@ func (f *factoryAEAD) NewRandomKey() (symmecrypt.Key, error) {
 	return k, nil
 }
 
+func (f *factoryAEAD) NewConvergentKey(s string) (symmecrypt.Key, error) {
+	btes, err := RawKey([]byte(s), f.keyLen)
+	if err != nil {
+		return nil, err
+	}
+	k, err := f.NewKey(string(btes))
+	if err != nil {
+		return nil, err
+	}
+	km := &KeyMutex{Key: k}
+	kc := &KeyConvergent{key: km}
+
+	return kc, nil
+}
+
 // KeyAEAD is a base implementation of a symmecrypt key that uses AEAD ciphers.
 // It transforms any AEAD cipher factory into a full-fledged symmecrypt key implementation.
 type KeyAEAD struct {
@@ -127,7 +143,6 @@ func NewRandomKeyAEAD(keyLen int, factory func([]byte) (cipher.AEAD, error)) (sy
 
 // Encrypt arbitrary data. Extra data can be passed for MAC.
 func (b KeyAEAD) Encrypt(text []byte, extra ...[]byte) ([]byte, error) {
-
 	ciph, err := b.cipherFactory(b.key)
 	if err != nil {
 		return nil, err
@@ -139,10 +154,8 @@ func (b KeyAEAD) Encrypt(text []byte, extra ...[]byte) ([]byte, error) {
 	}
 
 	var extraData []byte
-	if len(extra) > 0 {
-		for _, e := range extra {
-			extraData = append(extraData, e...)
-		}
+	for _, e := range extra {
+		extraData = append(extraData, e...)
 	}
 
 	ciphertext := ciph.Seal(nil, nonce, text, extraData)
@@ -166,10 +179,8 @@ func (b KeyAEAD) Decrypt(text []byte, extra ...[]byte) ([]byte, error) {
 	ciphertext := text[ciph.NonceSize():]
 
 	var extraData []byte
-	if len(extra) > 0 {
-		for _, e := range extra {
-			extraData = append(extraData, e...)
-		}
+	for _, e := range extra {
+		extraData = append(extraData, e...)
 	}
 
 	plaintext, err := ciph.Open(nil, nonce, ciphertext, extraData)
@@ -263,4 +274,71 @@ func (k *KeyMutex) String() (string, error) {
 	defer k.mut.Unlock()
 
 	return k.Key.String()
+}
+
+type KeyConvergent struct {
+	key     *KeyMutex
+	counter uint32
+	Cfg     fmt.Stringer
+}
+
+func (k *KeyConvergent) incrementCounter() {
+	k.counter++
+}
+
+func (k *KeyConvergent) Encrypt(t []byte, extras ...[]byte) ([]byte, error) {
+	defer k.incrementCounter()
+
+	keyAEAD, ok := k.key.Key.(*KeyAEAD)
+	if !ok {
+		return nil, errors.New("unsupported key")
+	}
+
+	ciph, err := keyAEAD.cipherFactory(keyAEAD.key)
+	if err != nil {
+		return nil, err
+	}
+
+	nonce := make([]byte, ciph.NonceSize(), ciph.NonceSize()+ciph.Overhead()+len(t)) // Extra capacity to append ciphertext without realloc
+	binary.PutUvarint(nonce, uint64(k.counter))
+
+	var extraData []byte
+	for _, e := range extras {
+		extraData = append(extraData, e...)
+	}
+
+	ciphertext := ciph.Seal(nil, nonce, t, extraData)
+
+	return append(nonce, ciphertext...), nil
+}
+
+func (k *KeyConvergent) Decrypt(t []byte, extras ...[]byte) ([]byte, error) {
+	return k.key.Decrypt(t, extras...)
+}
+
+func (k *KeyConvergent) EncryptMarshal(i interface{}, extras ...[]byte) (string, error) {
+	serialized, err := json.Marshal(i)
+	if err != nil {
+		return "", err
+	}
+	ciphered, err := k.Encrypt(serialized, extras...)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(ciphered), nil
+}
+
+func (k *KeyConvergent) DecryptMarshal(s string, i interface{}, extras ...[]byte) error {
+	return k.key.DecryptMarshal(s, i, extras...)
+}
+
+func (k *KeyConvergent) Wait() {
+	k.key.Wait()
+}
+
+func (k *KeyConvergent) String() (string, error) {
+	if k.Cfg == nil {
+		return "", errors.New("unable to render convergent key representation")
+	}
+	return k.Cfg.String(), nil
 }

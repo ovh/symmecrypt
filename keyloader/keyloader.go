@@ -1,6 +1,7 @@
 package keyloader
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"sync"
@@ -8,10 +9,11 @@ import (
 	"time"
 
 	"github.com/juju/errors"
+
 	"github.com/ovh/configstore"
 	"github.com/ovh/symmecrypt"
 	"github.com/ovh/symmecrypt/seal"
-	"github.com/sirupsen/logrus"
+	"github.com/ovh/symmecrypt/symutils"
 
 	// aes-gcm cipher
 	_ "github.com/ovh/symmecrypt/ciphers/aesgcm"
@@ -49,11 +51,17 @@ var (
 // - Sealed controls whether the key should be used as-is, or decrypted using symmecrypt/seal
 //   See RegisterCipher() to register a factory. The cipher field should be the same as the factory name.
 type KeyConfig struct {
-	Identifier string `json:"identifier"`
+	Identifier string `json:"identifier,omitempty"`
 	Cipher     string `json:"cipher"`
 	Timestamp  int64  `json:"timestamp,omitempty"`
 	Sealed     bool   `json:"sealed,omitempty"`
 	Key        string `json:"key"`
+	Convergent bool   `json:"convergent,omitempty"`
+}
+
+func (k KeyConfig) String() string {
+	btes, _ := json.Marshal(k)
+	return string(btes)
 }
 
 // A watchKey is an implementation of a key that watches for configstore updates
@@ -139,6 +147,7 @@ func UnsealKey(k *KeyConfig, s *seal.Seal) (*KeyConfig, error) {
 			Timestamp:  k.Timestamp,
 			Cipher:     k.Cipher,
 			Sealed:     k.Sealed,
+			Convergent: k.Convergent,
 		}, nil
 	}
 
@@ -153,6 +162,7 @@ func UnsealKey(k *KeyConfig, s *seal.Seal) (*KeyConfig, error) {
 		Cipher:     k.Cipher,
 		Timestamp:  k.Timestamp,
 		Sealed:     false,
+		Convergent: k.Convergent,
 	}, nil
 }
 
@@ -162,7 +172,7 @@ func ConfiguredKeys() ([]*KeyConfig, error) {
 	return ConfiguredKeysFromStore(configstore.DefaultStore)
 }
 
-// ConfiguredKeys returns a list of all the encryption keys present in a specific store instance
+// ConfiguredKeysFromStore returns a list of all the encryption keys present in a specific store instance
 // ensuring they are unsealed.
 func ConfiguredKeysFromStore(store *configstore.Store) ([]*KeyConfig, error) {
 
@@ -273,21 +283,14 @@ func LoadKeyFromStore(identifier string, store *configstore.Store) (symmecrypt.K
 		}
 		var ref symmecrypt.Key
 		cfg := i.(*KeyConfig)
-		factory, err := symmecrypt.GetKeyFactory(cfg.Cipher)
+
+		if cfg.Sealed && hadNonSealed {
+			panic(fmt.Sprintf("encryption key '%s': DANGER! Detected downgrade to non-sealed encryption key. Non-sealed key has higher priority, this looks malicious. Aborting!", identifier))
+		}
+
+		ref, err = NewKey(cfg)
 		if err != nil {
 			return nil, err
-		}
-		if cfg.Sealed {
-			if hadNonSealed {
-				panic(fmt.Sprintf("encryption key '%s': DANGER! Detected downgrade to non-sealed encryption key. Non-sealed key has higher priority, this looks malicious. Aborting!", identifier))
-			}
-			ref = newSealedKey(cfg, factory)
-		} else {
-			hadNonSealed = true
-			ref, err = factory.NewKey(cfg.Key)
-			if err != nil {
-				return nil, err
-			}
 		}
 
 		comp = append(comp, ref)
@@ -333,6 +336,29 @@ func singleKeyIdentifier(store *configstore.Store) (string, error) {
 	return "", errors.New("ambiguous config: several encryption keys found and no identifier supplied")
 }
 
+func NewKey(cfg *KeyConfig) (symmecrypt.Key, error) {
+	factory, err := symmecrypt.GetKeyFactory(cfg.Cipher)
+	if err != nil {
+		return nil, err
+	}
+
+	if cfg.Sealed {
+		return newSealedKey(cfg, factory), nil
+	}
+
+	if cfg.Convergent {
+		k, err := factory.NewConvergentKey(cfg.Key)
+		if err != nil {
+			return nil, err
+		}
+		k.(*symutils.KeyConvergent).Cfg = cfg
+		return k, nil
+	}
+
+	return factory.NewKey(cfg.Key)
+
+}
+
 // WatchKey instantiates a new hot-reloading encryption key from the default store in configstore.
 // It uses LoadKey(), so the underlying implementation can be anything supported (composite, sealed, any cipher, ...)
 func WatchKey(identifier string) (symmecrypt.Key, error) {
@@ -359,7 +385,7 @@ func WatchSingleKey() (symmecrypt.Key, error) {
 	return WatchSingleKeyFromStore(configstore.DefaultStore)
 }
 
-// WatchSingleKey instantiates a new hot-reloading encryption key from a specific store instance without specifying its identifier.
+// WatchSingleKeyFromStore instantiates a new hot-reloading encryption key from a specific store instance without specifying its identifier.
 // It will error if several different identifiers are found.
 func WatchSingleKeyFromStore(store *configstore.Store) (symmecrypt.Key, error) {
 	ident, err := singleKeyIdentifier(store)
@@ -380,7 +406,7 @@ func (kh *watchKey) watch(store *configstore.Store) {
 		// small sleep to yield to symmecrypt/seal in case of seal change
 		b, err := LoadKeyFromStore(kh.identifier, store)
 		if err != nil {
-			logrus.Errorf("symmecrypt/keyloader: configuration fetch error for key '%s': %s", kh.identifier, err)
+			symmecrypt.LogErrorFunc("symmecrypt/keyloader: configuration fetch error for key '%s': %s", kh.identifier, err)
 			continue
 		}
 		k := kh.Key()
@@ -444,7 +470,12 @@ func newSealedKey(cfg *KeyConfig, factory symmecrypt.KeyFactory) symmecrypt.Key 
 		if err != nil {
 			panic(fmt.Sprintf("Sealed encryption key '%s' cannot be decrypted: %s", cfg.Identifier, err.Error()))
 		}
-		ret.decryptedKey, err = factory.NewKey(decK.Key)
+		if decK.Convergent {
+			ret.decryptedKey, err = factory.NewConvergentKey(decK.Key)
+		} else {
+			ret.decryptedKey, err = factory.NewKey(decK.Key)
+		}
+
 		if err != nil {
 			panic(fmt.Sprintf("Sealed encryption key '%s' cannot be initialized: %s", cfg.Identifier, err.Error()))
 		}
