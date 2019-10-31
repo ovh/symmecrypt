@@ -2,19 +2,25 @@ package symmecrypt_test
 
 import (
 	"bytes"
+	"crypto/sha512"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
-	"github.com/pelletier/go-toml"
+	"github.com/ovh/configstore"
+	toml "github.com/pelletier/go-toml"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	yaml "gopkg.in/yaml.v2"
 
-	"github.com/ovh/configstore"
 	"github.com/ovh/symmecrypt"
+	"github.com/ovh/symmecrypt/ciphers/aesgcm"
 	"github.com/ovh/symmecrypt/keyloader"
+	"github.com/ovh/symmecrypt/symutils"
 )
 
 func ProviderTest() (configstore.ItemList, error) {
@@ -392,5 +398,171 @@ func ExampleNewReader() {
 	_, err = io.Copy(os.Stdout, reader)
 	if err != nil {
 		panic(err)
+	}
+}
+
+func TestConvergentEncryption(t *testing.T) {
+	var content = "this is a very sensitive content"
+
+	// The key will be instanciate from the sha152 of the content
+	hash := sha512.New512_256()
+	_, err := io.Copy(hash, strings.NewReader(content))
+	require.NoError(t, err)
+	sha512 := string(hash.Sum(nil))
+
+	// Prepare a keyloadConfig to be able to instanciate the key properly
+	cfg := keyloader.KeyConfig{
+		Cipher:     aesgcm.CipherName,
+		Convergent: true,
+		Key:        sha512,
+	}
+
+	// Instanciate a convergent key from the sha512
+	k, err := keyloader.NewKey(&cfg)
+	require.NoError(t, err)
+	require.NotNil(t, k)
+	// Assert the key is a congervent key
+	_, ok := k.(*symutils.KeyConvergent)
+	assert.True(t, ok)
+
+	encryptedBuffer, err := k.Encrypt([]byte(content))
+	require.NoError(t, err)
+
+	// Due to the nonce, the same plain text with the same key won't be encrypted the same way
+	encryptedBuffer2, err := k.Encrypt([]byte(content))
+	require.NoError(t, err)
+	assert.NotEqual(t, encryptedBuffer, encryptedBuffer2)
+
+	// But if we reinitialize the key, it will encrypt the plain text in a deterministic way
+	k, err = keyloader.NewKey(&cfg)
+	require.NoError(t, err)
+	require.NotNil(t, k)
+	encryptedBuffer3, err := k.Encrypt([]byte(content))
+	require.NoError(t, err)
+	assert.Equal(t, encryptedBuffer, encryptedBuffer3)
+
+	// Checks that all decrypted contents
+	decContent, err := k.Decrypt(encryptedBuffer)
+	require.NoError(t, err)
+	assert.Equal(t, content, string(decContent))
+
+	decContent, err = k.Decrypt(encryptedBuffer2)
+	require.NoError(t, err)
+	assert.Equal(t, content, string(decContent))
+
+	decContent, err = k.Decrypt(encryptedBuffer3)
+	require.NoError(t, err)
+	assert.Equal(t, content, string(decContent))
+
+	// Dump the key configuration to string
+	cfgS, err := k.String()
+	require.NoError(t, err)
+
+	// Marshal it as a KeyConfig
+	var cfg2 keyloader.KeyConfig
+	err = json.Unmarshal([]byte(cfgS), &cfg2)
+	require.NoError(t, err)
+
+	// Reload the key from its configuration
+	k, err = keyloader.NewKey(&cfg)
+	require.NoError(t, err)
+	// check encrypt/decrypt
+	encryptedBufferBis, err := k.Encrypt([]byte(content))
+	require.NoError(t, err)
+	decContent, err = k.Decrypt(encryptedBufferBis)
+	require.NoError(t, err)
+	assert.Equal(t, content, string(decContent))
+	// Check the deterministic nonce
+	assert.Equal(t, encryptedBuffer, encryptedBufferBis)
+}
+
+func TestWriteAndRead(t *testing.T) {
+	var content = "this is a very sensitive content"
+
+	k, err := keyloader.LoadKey("test")
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	w := symmecrypt.NewWriter(&buf, k)
+	_, err = io.Copy(w, strings.NewReader(content))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	r, err := symmecrypt.NewReader(bytes.NewReader(buf.Bytes()), k)
+	require.NoError(t, err)
+
+	var out bytes.Buffer
+	_, err = io.Copy(&out, r)
+	require.NoError(t, err)
+
+	assert.Equal(t, content, out.String())
+}
+
+func TestChunksWriterAndChunksReader(t *testing.T) {
+	var chunckSize = 10
+	var content = "this is a very sensitive content"
+
+	k, err := keyloader.LoadKey("test")
+	require.NoError(t, err)
+
+	var encryptedWriter bytes.Buffer
+	cw := symmecrypt.NewChunksWriter(&encryptedWriter, k, chunckSize)
+
+	n, err := io.Copy(cw, strings.NewReader(content))
+	require.NoError(t, err)
+
+	encryptedContent := encryptedWriter.Bytes()
+	t.Logf("%d bytes encrypted: %x", n, encryptedContent)
+
+	decryptedOutput := bytes.Buffer{}
+	cr := symmecrypt.NewChunksReader(bytes.NewReader(encryptedContent), k, chunckSize)
+
+	n, err = io.Copy(&decryptedOutput, cr)
+	require.NoError(t, err)
+	result := decryptedOutput.String()
+	t.Logf("%d bytes decrypted: %s", n, result)
+
+	assert.Equal(t, content, result)
+}
+
+func BenchmarkChunksWriter(b *testing.B) {
+	var chunckSize = 10
+	var content = "this is a very sensitive content"
+
+	for n := 0; n < b.N; n++ {
+		k, err := keyloader.LoadKey("test")
+		require.NoError(b, err)
+
+		var encryptedWriter bytes.Buffer
+		cw := symmecrypt.NewChunksWriter(&encryptedWriter, k, chunckSize)
+
+		_, err = io.Copy(cw, strings.NewReader(content))
+		require.NoError(b, err)
+	}
+}
+
+func BenchmarkChunksReader(b *testing.B) {
+	var chunckSize = 10
+	var content = "this is a very sensitive content"
+
+	k, err := keyloader.LoadKey("test")
+	require.NoError(b, err)
+
+	var encryptedWriter bytes.Buffer
+	cw := symmecrypt.NewChunksWriter(&encryptedWriter, k, chunckSize)
+
+	n, err := io.Copy(cw, strings.NewReader(content))
+	require.NoError(b, err)
+
+	encryptedContent := encryptedWriter.Bytes()
+	b.Logf("%d bytes encrypted: %x", n, encryptedContent)
+
+	for n := 0; n < b.N; n++ {
+		decryptedOutput := bytes.Buffer{}
+		cr := symmecrypt.NewChunksReader(bytes.NewReader(encryptedContent), k, chunckSize)
+		_, err := io.Copy(&decryptedOutput, cr)
+		require.NoError(b, err)
+		result := decryptedOutput.String()
+		assert.Equal(b, content, result)
 	}
 }
