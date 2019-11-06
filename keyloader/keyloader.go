@@ -3,6 +3,7 @@ package keyloader
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -13,7 +14,6 @@ import (
 	"github.com/ovh/configstore"
 	"github.com/ovh/symmecrypt"
 	"github.com/ovh/symmecrypt/seal"
-	"github.com/ovh/symmecrypt/symutils"
 
 	// aes-gcm cipher
 	_ "github.com/ovh/symmecrypt/ciphers/aesgcm"
@@ -51,12 +51,13 @@ var (
 // - Sealed controls whether the key should be used as-is, or decrypted using symmecrypt/seal
 //   See RegisterCipher() to register a factory. The cipher field should be the same as the factory name.
 type KeyConfig struct {
-	Identifier string `json:"identifier,omitempty"`
-	Cipher     string `json:"cipher"`
-	Timestamp  int64  `json:"timestamp,omitempty"`
-	Sealed     bool   `json:"sealed,omitempty"`
-	Key        string `json:"key"`
-	Convergent bool   `json:"convergent,omitempty"`
+	Identifier     string `json:"identifier,omitempty"`
+	Cipher         string `json:"cipher"`
+	Timestamp      int64  `json:"timestamp,omitempty"`
+	Sealed         bool   `json:"sealed,omitempty"`
+	Key            string `json:"key"`
+	Sequential     bool   `json:"sequential,omitempty"`
+	SequentialSalt []byte `json:"salt,omitempty"`
 }
 
 func (k KeyConfig) String() string {
@@ -147,7 +148,7 @@ func UnsealKey(k *KeyConfig, s *seal.Seal) (*KeyConfig, error) {
 			Timestamp:  k.Timestamp,
 			Cipher:     k.Cipher,
 			Sealed:     k.Sealed,
-			Convergent: k.Convergent,
+			Sequential: k.Sequential,
 		}, nil
 	}
 
@@ -162,7 +163,7 @@ func UnsealKey(k *KeyConfig, s *seal.Seal) (*KeyConfig, error) {
 		Cipher:     k.Cipher,
 		Timestamp:  k.Timestamp,
 		Sealed:     false,
-		Convergent: k.Convergent,
+		Sequential: k.Sequential,
 	}, nil
 }
 
@@ -257,7 +258,6 @@ func LoadKey(identifier string) (symmecrypt.Key, error) {
 // Either use a built-in cipher, or make sure to register a proper factory for this cipher.
 // This KeyFactory will be called, either directly or when the symmecrypt/seal global singleton gets unsealed, if applicable.
 func LoadKeyFromStore(identifier string, store *configstore.Store) (symmecrypt.Key, error) {
-
 	items, err := ConfigFilter.Slice(identifier).Store(store).GetItemList()
 	if err != nil {
 		return nil, err
@@ -271,33 +271,47 @@ func LoadKeyFromStore(identifier string, store *configstore.Store) (symmecrypt.K
 		return nil, fmt.Errorf("ambiguous config: several encryption keys conflicting for '%s'", identifier)
 	}
 
-	comp := symmecrypt.CompositeKey{}
-
-	hadNonSealed := false
-
+	var cfgs []*KeyConfig
 	for _, item := range items.Items {
-
 		i, err := item.Unmarshaled()
 		if err != nil {
 			return nil, err
 		}
+		cfgs = append(cfgs, i.(*KeyConfig))
+	}
+
+	k, err := NewKey(cfgs...)
+	if err != nil {
+		return nil, err
+	}
+	comp, ok := k.(symmecrypt.CompositeKey)
+	if ok && len(comp) == 1 {
+		return (comp)[0], nil
+	}
+
+	return k, nil
+}
+
+func NewKey(cfgs ...*KeyConfig) (symmecrypt.Key, error) {
+	var comp symmecrypt.CompositeKey
+	var hadNonSealed = false
+
+	for i := range cfgs {
+		var cfg = cfgs[i]
 		var ref symmecrypt.Key
-		cfg := i.(*KeyConfig)
 
 		if cfg.Sealed && hadNonSealed {
-			panic(fmt.Sprintf("encryption key '%s': DANGER! Detected downgrade to non-sealed encryption key. Non-sealed key has higher priority, this looks malicious. Aborting!", identifier))
+			panic(fmt.Sprintf("encryption key '%s': DANGER! Detected downgrade to non-sealed encryption key. Non-sealed key has higher priority, this looks malicious. Aborting!", cfg.Identifier))
+		} else if !cfg.Sealed {
+			hadNonSealed = true
 		}
 
-		ref, err = NewKey(cfg)
+		ref, err := newKey(cfg)
 		if err != nil {
 			return nil, err
 		}
 
 		comp = append(comp, ref)
-	}
-
-	if len(comp) == 1 {
-		return comp[0], nil
 	}
 
 	return comp, nil
@@ -309,7 +323,7 @@ func LoadSingleKey() (symmecrypt.Key, error) {
 	return LoadSingleKeyFromStore(configstore.DefaultStore)
 }
 
-// LoadSingleKey instantiates a new encryption key using LoadKey from a specific store instance without specifying its identifier.
+// LoadSingleKeyFromStore instantiates a new encryption key using LoadKey from a specific store instance without specifying its identifier.
 // It will error if several different identifiers are found.
 func LoadSingleKeyFromStore(store *configstore.Store) (symmecrypt.Key, error) {
 	ident, err := singleKeyIdentifier(store)
@@ -336,7 +350,7 @@ func singleKeyIdentifier(store *configstore.Store) (string, error) {
 	return "", errors.New("ambiguous config: several encryption keys found and no identifier supplied")
 }
 
-func NewKey(cfg *KeyConfig) (symmecrypt.Key, error) {
+func newKey(cfg *KeyConfig) (symmecrypt.Key, error) {
 	factory, err := symmecrypt.GetKeyFactory(cfg.Cipher)
 	if err != nil {
 		return nil, err
@@ -346,17 +360,23 @@ func NewKey(cfg *KeyConfig) (symmecrypt.Key, error) {
 		return newSealedKey(cfg, factory), nil
 	}
 
-	if cfg.Convergent {
-		k, err := factory.NewConvergentKey(cfg.Key)
+	if cfg.Sequential {
+		k, err := factory.NewSequentialKey(cfg.Key, cfg.SequentialSalt...)
 		if err != nil {
 			return nil, err
 		}
-		k.(*symutils.KeyConvergent).Cfg = cfg
 		return k, nil
 	}
 
 	return factory.NewKey(cfg.Key)
+}
 
+func ConvergentLocator(r io.Reader) (string, error) {
+	return "", nil
+}
+
+func NewConvergentKey(r io.Reader) (symmecrypt.Key, error) {
+	return nil, nil
 }
 
 // WatchKey instantiates a new hot-reloading encryption key from the default store in configstore.
@@ -470,8 +490,8 @@ func newSealedKey(cfg *KeyConfig, factory symmecrypt.KeyFactory) symmecrypt.Key 
 		if err != nil {
 			panic(fmt.Sprintf("Sealed encryption key '%s' cannot be decrypted: %s", cfg.Identifier, err.Error()))
 		}
-		if decK.Convergent {
-			ret.decryptedKey, err = factory.NewConvergentKey(decK.Key)
+		if decK.Sequential {
+			ret.decryptedKey, err = factory.NewSequentialKey(decK.Key)
 		} else {
 			ret.decryptedKey, err = factory.NewKey(decK.Key)
 		}

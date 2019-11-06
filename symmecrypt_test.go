@@ -3,13 +3,17 @@ package symmecrypt_test
 import (
 	"bytes"
 	"crypto/sha512"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"math/rand"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ovh/configstore"
 	toml "github.com/pelletier/go-toml"
@@ -401,29 +405,26 @@ func ExampleNewReader() {
 	}
 }
 
-func TestConvergentEncryption(t *testing.T) {
+func TestSequentialEncryption(t *testing.T) {
 	var content = "this is a very sensitive content"
 
 	// The key will be instanciate from the sha152 of the content
 	hash := sha512.New512_256()
 	_, err := io.Copy(hash, strings.NewReader(content))
 	require.NoError(t, err)
-	sha512 := string(hash.Sum(nil))
+	sha512 := hex.EncodeToString(hash.Sum(nil))
 
 	// Prepare a keyloadConfig to be able to instanciate the key properly
 	cfg := keyloader.KeyConfig{
 		Cipher:     aesgcm.CipherName,
-		Convergent: true,
+		Sequential: true,
 		Key:        sha512,
 	}
 
-	// Instanciate a convergent key from the sha512
+	// Instanciate a Sequential key from the sha512
 	k, err := keyloader.NewKey(&cfg)
 	require.NoError(t, err)
 	require.NotNil(t, k)
-	// Assert the key is a congervent key
-	_, ok := k.(*symutils.KeyConvergent)
-	assert.True(t, ok)
 
 	encryptedBuffer, err := k.Encrypt([]byte(content))
 	require.NoError(t, err)
@@ -454,26 +455,111 @@ func TestConvergentEncryption(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, content, string(decContent))
 
-	// Dump the key configuration to string
-	cfgS, err := k.String()
-	require.NoError(t, err)
+	t.Run("key reinitialization from config", func(t *testing.T) {
+		// Dump the key configuration to string
+		cfgBtes, err := json.Marshal(cfg)
+		require.NoError(t, err)
 
-	// Marshal it as a KeyConfig
-	var cfg2 keyloader.KeyConfig
-	err = json.Unmarshal([]byte(cfgS), &cfg2)
-	require.NoError(t, err)
+		var cfg2 keyloader.KeyConfig
 
-	// Reload the key from its configuration
-	k, err = keyloader.NewKey(&cfg)
-	require.NoError(t, err)
-	// check encrypt/decrypt
-	encryptedBufferBis, err := k.Encrypt([]byte(content))
-	require.NoError(t, err)
-	decContent, err = k.Decrypt(encryptedBufferBis)
-	require.NoError(t, err)
-	assert.Equal(t, content, string(decContent))
-	// Check the deterministic nonce
-	assert.Equal(t, encryptedBuffer, encryptedBufferBis)
+		t.Log(string(cfgBtes))
+
+		// Marshal it as a KeyConfig
+		err = json.Unmarshal(cfgBtes, &cfg2)
+		require.NoError(t, err)
+
+		// Reload the key from its configuration
+		k, err = keyloader.NewKey(&cfg2)
+		require.NoError(t, err)
+		// check encrypt/decrypt
+		encryptedBufferBis, err := k.Encrypt([]byte(content))
+		require.NoError(t, err)
+		decContent, err = k.Decrypt(encryptedBufferBis)
+		require.NoError(t, err)
+		assert.Equal(t, content, string(decContent))
+		// Check the deterministic nonce
+		assert.Equal(t, encryptedBuffer, encryptedBufferBis)
+	})
+
+	t.Run("with salt", func(t *testing.T) {
+		cfg := keyloader.KeyConfig{
+			Cipher:         aesgcm.CipherName,
+			Sequential:     true,
+			Key:            sha512,
+			SequentialSalt: symutils.RandomSalt(),
+		}
+
+		// Instanciate a Sequential key from the sha512
+		k, err := keyloader.NewKey(&cfg)
+		require.NoError(t, err)
+		require.NotNil(t, k)
+
+		encryptedBufferWithSalt, err := k.Encrypt([]byte(content))
+		require.NoError(t, err)
+
+		// With the salt, the encyption should be equals to the encryption without salt
+		assert.NotEqual(t, encryptedBuffer, encryptedBufferWithSalt)
+
+		// BTW decryption should be fine
+		decContent, err = k.Decrypt(encryptedBufferWithSalt)
+		require.NoError(t, err)
+		assert.Equal(t, content, string(decContent))
+
+		cfgBtes, err := json.Marshal(cfg)
+		require.NoError(t, err)
+		t.Log(string(cfgBtes))
+	})
+
+	t.Run("with multiple salts", func(t *testing.T) {
+		cfg1 := &keyloader.KeyConfig{
+			Cipher:         aesgcm.CipherName,
+			Sequential:     true,
+			Key:            sha512,
+			SequentialSalt: symutils.RandomSalt(),
+			Timestamp:      time.Now().Add(-1 * time.Hour).Unix(),
+		}
+
+		cfg2 := &keyloader.KeyConfig{
+			Cipher:         aesgcm.CipherName,
+			Sequential:     true,
+			Key:            sha512,
+			SequentialSalt: symutils.RandomSalt(),
+			Timestamp:      time.Now().Unix(),
+		}
+
+		k, err := keyloader.NewKey(cfg2, cfg1)
+		require.NoError(t, err)
+
+		encryptedBufferWithSalt, err := k.Encrypt([]byte(content))
+		require.NoError(t, err)
+
+		// With the salt, the encyption should be equals to the encryption without salt
+		assert.NotEqual(t, encryptedBuffer, encryptedBufferWithSalt)
+
+		cfg2.Timestamp = time.Now().Add(-1 * time.Minute).Unix()
+
+		//	Now we will add a new  key to the composite key
+		cfg3 := &keyloader.KeyConfig{
+			Cipher:         aesgcm.CipherName,
+			Sequential:     true,
+			Key:            sha512,
+			SequentialSalt: symutils.RandomSalt(),
+			Timestamp:      time.Now().Unix(),
+		}
+
+		k, err = keyloader.NewKey(cfg3, cfg2, cfg1)
+		require.NoError(t, err)
+
+		encryptedBufferWithSaltBis, err := k.Encrypt([]byte(content))
+		require.NoError(t, err)
+
+		// With the salt, the encyption should be equals to the encryption without salt
+		assert.NotEqual(t, encryptedBuffer, encryptedBufferWithSaltBis)
+
+		assert.NotEqual(t, encryptedBufferWithSalt, encryptedBufferWithSaltBis)
+
+	})
+
 }
 
 func TestWriteAndRead(t *testing.T) {
@@ -499,7 +585,7 @@ func TestWriteAndRead(t *testing.T) {
 }
 
 func TestChunksWriterAndChunksReader(t *testing.T) {
-	var chunckSize = 10
+	var chunckSize = 11
 	var content = "this is a very sensitive content"
 
 	k, err := keyloader.LoadKey("test")
@@ -565,4 +651,79 @@ func BenchmarkChunksReader(b *testing.B) {
 		result := decryptedOutput.String()
 		assert.Equal(b, content, result)
 	}
+}
+
+func TestConvergentEncryptionWithDeduplication(t *testing.T) {
+	// Prepare a dummy file of 1024 Mo
+	f, err := ioutil.TempFile(".", t.Name()+"*")
+	require.NoError(t, err)
+
+	var buff = make([]byte, 1024*1024*1024)
+	rand.Read(buff)
+	f.Write(buff)
+	require.NoError(t, f.Close())
+
+	// Repoen to have a reader
+	r, err := os.Open(f.Name())
+	require.NoError(t, err)
+
+	// Calculate the salt
+	salt := symutils.RandomSalt()
+
+	// Get the sha512
+	hash := sha512.New512_256()
+	_, err = io.Copy(hash, r)
+	require.NoError(t, err)
+	sha512 := hex.EncodeToString(hash.Sum(nil))
+	r.Close()
+
+	locator := t.Name() + symutils.Locator(sha512, salt...)
+
+	// at the first time, the file should not exist
+	_, err = os.Stat(locator)
+	require.True(t, os.IsNotExist(err))
+
+	// So we will write it with chunks writer encryption
+	// Repoen to have a reader
+	r, err = os.Open(f.Name())
+	require.NoError(t, err)
+
+	cfg := keyloader.KeyConfig{
+		Cipher:         aesgcm.CipherName,
+		Sequential:     true,
+		Key:            sha512,
+		SequentialSalt: salt,
+	}
+
+	// Instanciate a Sequential key from the sha512
+	k, err := keyloader.NewKey(&cfg)
+	require.NoError(t, err)
+	require.NotNil(t, k)
+
+	// Prepare the destination writer for the encrypted content
+	w, err := os.Create(locator)
+	require.NoError(t, err)
+	cw := symmecrypt.NewChunksWriter(w, k, 1024*1024, salt)
+
+	n, err := io.Copy(cw, r)
+	t.Logf("encrypting %d bytes from %s to %s", n, f.Name(), locator)
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	// Then the file should exists
+	locator2 := t.Name() + symutils.Locator(sha512, salt...)
+	_, err = os.Stat(locator2)
+	require.True(t, err == nil || os.IsExist(err))
+
+	r, err = os.Open(locator2)
+	require.NoError(t, err)
+	var actualBuff bytes.Buffer
+	cr := symmecrypt.NewChunksReader(r, k, 1024*1014*1024, salt)
+	n, err = io.Copy(&actualBuff, cr)
+	t.Logf("decrypting %d bytes from %s", n, locator)
+	require.NoError(t, err)
+	require.NoError(t, r.Close())
+
+	assert.True(t, bytes.Compare(buff, actualBuff.Bytes()) == 1)
+
 }

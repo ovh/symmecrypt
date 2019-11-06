@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha1"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -12,6 +13,8 @@ import (
 	"fmt"
 	"io"
 	"sync"
+
+	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/ovh/symmecrypt"
 )
@@ -101,7 +104,13 @@ func (f *factoryAEAD) NewRandomKey() (symmecrypt.Key, error) {
 	return k, nil
 }
 
-func (f *factoryAEAD) NewConvergentKey(s string) (symmecrypt.Key, error) {
+func RandomSalt() []byte {
+	var buff = make([]byte, 8)
+	rand.Read(buff) // nolint
+	return buff
+}
+
+func (f *factoryAEAD) NewSequentialKey(s string, salt ...byte) (symmecrypt.Key, error) {
 	btes, err := RawKey([]byte(s), f.keyLen)
 	if err != nil {
 		return nil, err
@@ -110,10 +119,13 @@ func (f *factoryAEAD) NewConvergentKey(s string) (symmecrypt.Key, error) {
 	if err != nil {
 		return nil, err
 	}
-	km := &KeyMutex{Key: k}
-	kc := &KeyConvergent{key: km}
-
-	return kc, nil
+	km := &KeyMutex{
+		Key: &KeySequential{
+			k:    k.(*KeyAEAD),
+			salt: salt,
+		},
+	}
+	return km, nil
 }
 
 // KeyAEAD is a base implementation of a symmecrypt key that uses AEAD ciphers.
@@ -165,7 +177,6 @@ func (b KeyAEAD) Encrypt(text []byte, extra ...[]byte) ([]byte, error) {
 
 // Decrypt arbitrary data. Extra data can be passed for MAC.
 func (b KeyAEAD) Decrypt(text []byte, extra ...[]byte) ([]byte, error) {
-
 	ciph, err := b.cipherFactory(b.key)
 	if err != nil {
 		return nil, err
@@ -276,31 +287,27 @@ func (k *KeyMutex) String() (string, error) {
 	return k.Key.String()
 }
 
-type KeyConvergent struct {
-	key     *KeyMutex
+type KeySequential struct {
+	k       *KeyAEAD
 	counter uint32
-	Cfg     fmt.Stringer
+	salt    []byte
 }
 
-func (k *KeyConvergent) incrementCounter() {
+func (k *KeySequential) incrementCounter() {
 	k.counter++
 }
 
-func (k *KeyConvergent) Encrypt(t []byte, extras ...[]byte) ([]byte, error) {
+func (k *KeySequential) Encrypt(t []byte, extras ...[]byte) ([]byte, error) {
 	defer k.incrementCounter()
 
-	keyAEAD, ok := k.key.Key.(*KeyAEAD)
-	if !ok {
-		return nil, errors.New("unsupported key")
-	}
-
-	ciph, err := keyAEAD.cipherFactory(keyAEAD.key)
+	ciph, err := k.k.cipherFactory(k.k.key)
 	if err != nil {
 		return nil, err
 	}
 
-	nonce := make([]byte, ciph.NonceSize(), ciph.NonceSize()+ciph.Overhead()+len(t)) // Extra capacity to append ciphertext without realloc
-	binary.PutUvarint(nonce, uint64(k.counter))
+	nonce := make([]byte, ciph.NonceSize(), ciph.NonceSize()+ciph.Overhead()+len(k.salt)+len(t)) // Extra capacity to append ciphertext without realloc
+	offset := copy(nonce, k.salt)
+	binary.PutUvarint(nonce[offset:], uint64(k.counter))
 
 	var extraData []byte
 	for _, e := range extras {
@@ -312,11 +319,11 @@ func (k *KeyConvergent) Encrypt(t []byte, extras ...[]byte) ([]byte, error) {
 	return append(nonce, ciphertext...), nil
 }
 
-func (k *KeyConvergent) Decrypt(t []byte, extras ...[]byte) ([]byte, error) {
-	return k.key.Decrypt(t, extras...)
+func (k *KeySequential) Decrypt(t []byte, extras ...[]byte) ([]byte, error) {
+	return k.k.Decrypt(t, extras...)
 }
 
-func (k *KeyConvergent) EncryptMarshal(i interface{}, extras ...[]byte) (string, error) {
+func (k *KeySequential) EncryptMarshal(i interface{}, extras ...[]byte) (string, error) {
 	serialized, err := json.Marshal(i)
 	if err != nil {
 		return "", err
@@ -328,17 +335,20 @@ func (k *KeyConvergent) EncryptMarshal(i interface{}, extras ...[]byte) (string,
 	return hex.EncodeToString(ciphered), nil
 }
 
-func (k *KeyConvergent) DecryptMarshal(s string, i interface{}, extras ...[]byte) error {
-	return k.key.DecryptMarshal(s, i, extras...)
+func (k *KeySequential) DecryptMarshal(s string, i interface{}, extras ...[]byte) error {
+	return k.k.DecryptMarshal(s, i, extras...)
 }
 
-func (k *KeyConvergent) Wait() {
-	k.key.Wait()
+func (k *KeySequential) Wait() {
+	k.k.Wait()
 }
 
-func (k *KeyConvergent) String() (string, error) {
-	if k.Cfg == nil {
-		return "", errors.New("unable to render convergent key representation")
-	}
-	return k.Cfg.String(), nil
+func (k *KeySequential) String() (string, error) {
+	return k.k.String()
+}
+
+// Locator returns the result of PBKDF2. PBKDF2 is a key derivation function
+// https://en.wikipedia.org/wiki/PBKDF2
+func Locator(s string, salt ...byte) string {
+	return hex.EncodeToString(pbkdf2.Key([]byte(s), salt, 4096, 32, sha1.New))
 }

@@ -29,7 +29,7 @@ type Key interface {
 type KeyFactory interface {
 	NewKey(string) (Key, error)
 	NewRandomKey() (Key, error)
-	NewConvergentKey(string) (Key, error)
+	NewSequentialKey(string, ...byte) (Key, error)
 }
 
 // CompositeKey provides a keyring mechanism: encrypt with first, decrypt with _any_
@@ -410,35 +410,79 @@ func (r *chunksReader) readNewChunk() error {
 	return nil
 }
 
-func (r *chunksReader) Read(p []byte) (int, error) {
+func (r *chunksReader) Read(p []byte) (x int, e error) {
 	if r.currentChunk == nil {
 		if err := r.readNewChunk(); err != nil {
-			return 0, err
+			return x, err
 		}
 	}
 
 	if len(p)+r.currentChunkReadBytes > r.chunkSize {
-		// The first part of 'p' will store the current chunk
-		p1 := p[:r.chunkSize-r.currentChunkReadBytes]
-		// The last part of 'p' will store the next chunk
-		p2 := p[r.chunkSize-r.currentChunkReadBytes:]
+		var pp = p
+		for {
+			// The first part of 'p' will store the current chunk
+			z := r.chunkSize - r.currentChunkReadBytes
+			if z > len(pp) {
+				z = len(pp)
+			}
+			p1 := pp[:z]
 
-		n, err := r.currentChunk.Read(p1)
-		r.currentChunkReadBytes += n
-		if err != nil {
-			return n, err
+			// Read the first part
+			n, err := r.currentChunk.Read(p1)
+			r.currentChunkReadBytes += n
+			x += n
+
+			if err != nil {
+				return x, err
+			}
+
+			// The last part of 'p' will store the next chunk
+			p2 := pp[n:]
+
+			// Since the chunk is over, let's reset it
+			if err := r.readNewChunk(); err != nil {
+				return x, err
+			}
+
+			if len(p2) == 0 {
+				return x, nil
+			}
+
+			if len(p2) < r.chunkSize {
+				m, err := r.currentChunk.Read(p2)
+				r.currentChunkReadBytes += m
+				x += m
+
+				if err != nil {
+					return x, err
+				}
+
+				if m < len(p2) {
+					pp = p2[m:]
+					// In this case, we probably hit the end of a chunk
+					if err := r.readNewChunk(); err != nil {
+						return x, err
+					}
+					continue
+				}
+				return x, nil
+			}
+
+			pp = p2
 		}
-
-		if err := r.readNewChunk(); err != nil {
-			return n, err
-		}
-
-		m, err := r.Read(p2)
-		r.currentChunkReadBytes += m
-		return n + m, err
 	}
 
 	n, err := r.currentChunk.Read(p)
 	r.currentChunkReadBytes += n
-	return n, err
+	x += n
+
+	if err != nil {
+		return x, err
+	}
+
+	if r.currentChunkReadBytes > r.chunkSize {
+		return x, r.readNewChunk()
+	}
+
+	return x, err
 }
