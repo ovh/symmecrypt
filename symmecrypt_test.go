@@ -660,7 +660,8 @@ func TestConvergentEncryptionWithDeduplication(t *testing.T) {
 
 	var buff = make([]byte, 1024*1024*1024)
 	rand.Read(buff)
-	f.Write(buff)
+	_, err = f.Write(buff)
+	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
 	// Repoen to have a reader
