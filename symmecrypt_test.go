@@ -658,7 +658,7 @@ func TestConvergentEncryptionWithDeduplication(t *testing.T) {
 	f, err := ioutil.TempFile(".", t.Name()+"*")
 	require.NoError(t, err)
 
-	var buff = make([]byte, 1024*1024*1024)
+	var buff = make([]byte, 10*1024*1024)
 	rand.Read(buff)
 	_, err = f.Write(buff)
 	require.NoError(t, err)
@@ -719,7 +719,7 @@ func TestConvergentEncryptionWithDeduplication(t *testing.T) {
 	r, err = os.Open(locator2)
 	require.NoError(t, err)
 	var actualBuff bytes.Buffer
-	cr := symmecrypt.NewChunksReader(r, k, 1024*1014*1024, salt)
+	cr := symmecrypt.NewChunksReader(r, k, 1014*1024, salt)
 	n, err = io.Copy(&actualBuff, cr)
 	t.Logf("decrypting %d bytes from %s", n, locator)
 	require.NoError(t, err)
