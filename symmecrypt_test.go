@@ -65,7 +65,7 @@ func ProviderTestKOSeal() (configstore.ItemList, error) {
 		Items: []configstore.Item{
 			configstore.NewItem(
 				keyloader.EncryptionKeyConfigName,
-				`{"key":"5fdb8af280b007a46553dfddb3f42bc10619dcabca8d4fdf5239b09445ab1a41","identifier":"test","sealed":false,"timestamp":2,"cipher":"aes-gcm"}`,
+				`{"key":"5fdb8af280b007a46553dfddb3f42bc10619dcabca8d4fdf5239b09445ab1a41","identifier":"test","sealed":false,"timestamp":10,"cipher":"aes-gcm"}`,
 				1,
 			),
 			configstore.NewItem(
@@ -400,7 +400,6 @@ func TestKeyloaderKO(t *testing.T) {
 
 	for testName, provider := range KOTests {
 		st := configstore.NewStore()
-
 		st.RegisterProvider("test", provider)
 
 		_, err := keyloader.LoadKeyFromStore("test", st)

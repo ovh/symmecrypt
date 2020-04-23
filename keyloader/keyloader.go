@@ -2,6 +2,7 @@ package keyloader
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -202,6 +203,7 @@ func reorderTimestamp(s *configstore.Item) int64 {
 	i, err := s.Unmarshaled()
 	if err == nil {
 		ret := i.(*KeyConfig).Timestamp
+		// small hack to tiebreak in favor of sealed keys (mostly in case of zero-value timestamp)
 		if i.(*KeyConfig).Sealed {
 			ret++
 		}
@@ -221,7 +223,6 @@ func configFactory() interface{} {
 // NewKey returns a symmecrypt.Key object configured from a number of KeyConfig objects.
 // If several KeyConfigs are supplied, the returned Key will be composite.
 // A composite key encrypts with the latest Key (based on timestamp) and decrypts with any of they keys.
-// The KeyConfig parameters are expected to be sorted, with the latest key as first element.
 //
 // If the key configuration specifies it is sealed, the key returned will be wrapped by an unseal mechanism.
 // When the symmecrypt/seal global singleton gets unsealed, the key will become usable instantly. It will return errors in the meantime.
@@ -235,16 +236,14 @@ func NewKey(cfgs ...*KeyConfig) (symmecrypt.Key, error) {
 		return nil, errors.New("missing key config")
 	}
 
-	firstTS := cfgs[0].Timestamp
+	// sort by timestamp: latest (bigger timestamp) first
+	sort.Slice(cfgs, func(i, j int) bool { return cfgs[i].Timestamp > cfgs[j].Timestamp })
+
 	firstNonSealed := !cfgs[0].Sealed
 	comp := symmecrypt.CompositeKey{}
 
 	for _, cfg := range cfgs {
 
-		// ensure the first position was indeed the latest key (used for encryption in composite keys)
-		if cfg.Timestamp > firstTS {
-			return nil, errors.New("latest key is not in first position (key configs should be sorted)")
-		}
 		var ref symmecrypt.Key
 		factory, err := symmecrypt.GetKeyFactory(cfg.Cipher)
 		if err != nil {
