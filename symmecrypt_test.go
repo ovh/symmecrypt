@@ -40,6 +40,49 @@ func ProviderTest() (configstore.ItemList, error) {
 	return ret, nil
 }
 
+// Bad config: conflicting timestamps
+func ProviderTestKOTimestamp() (configstore.ItemList, error) {
+	ret := configstore.ItemList{
+		Items: []configstore.Item{
+			configstore.NewItem(
+				keyloader.EncryptionKeyConfigName,
+				`{"key":"5fdb8af280b007a46553dfddb3f42bc10619dcabca8d4fdf5239b09445ab1a41","identifier":"test","sealed":false,"timestamp":1,"cipher":"aes-gcm"}`,
+				1,
+			),
+			configstore.NewItem(
+				keyloader.EncryptionKeyConfigName,
+				`{"key":"QXdDW4N/jmJzpMu7i1zu4YF1opTn7H+eOk9CLFGBSFg=","identifier":"test","sealed":false,"timestamp":1,"cipher":"xchacha20-poly1305"}`,
+				1,
+			),
+		},
+	}
+	return ret, nil
+}
+
+// Bad config: latest key non sealed
+func ProviderTestKOSeal() (configstore.ItemList, error) {
+	ret := configstore.ItemList{
+		Items: []configstore.Item{
+			configstore.NewItem(
+				keyloader.EncryptionKeyConfigName,
+				`{"key":"5fdb8af280b007a46553dfddb3f42bc10619dcabca8d4fdf5239b09445ab1a41","identifier":"test","sealed":false,"timestamp":2,"cipher":"aes-gcm"}`,
+				1,
+			),
+			configstore.NewItem(
+				keyloader.EncryptionKeyConfigName,
+				`{"key":"QXdDW4N/jmJzpMu7i1zu4YF1opTn7H+eOk9CLFGBSFg=","identifier":"test","sealed":true,"timestamp":1,"cipher":"xchacha20-poly1305"}`,
+				1,
+			),
+		},
+	}
+	return ret, nil
+}
+
+var KOTests = map[string]func() (configstore.ItemList, error){
+	"timestamp": ProviderTestKOTimestamp,
+	"seal":      ProviderTestKOSeal,
+}
+
 func TestMain(m *testing.M) {
 
 	configstore.RegisterProvider("test", ProviderTest)
@@ -349,6 +392,20 @@ func TestWriterWithEncoders(t *testing.T) {
 		// Check
 		if !reflect.DeepEqual(tt.data, actual) {
 			t.Fatalf("expected: %+v but got %+v", tt.data, actual)
+		}
+	}
+}
+
+func TestKeyloaderKO(t *testing.T) {
+
+	for testName, provider := range KOTests {
+		st := configstore.NewStore()
+
+		st.RegisterProvider("test", provider)
+
+		_, err := keyloader.LoadKeyFromStore("test", st)
+		if err == nil {
+			t.Fatalf("nil error with KO config (%s)", testName)
 		}
 	}
 }
