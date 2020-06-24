@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -213,6 +214,7 @@ func reorderTimestamp(s *configstore.Item) int64 {
 	i, err := s.Unmarshaled()
 	if err == nil {
 		ret := i.(*KeyConfig).Timestamp
+		// small hack to tiebreak in favor of sealed keys (mostly in case of zero-value timestamp)
 		if i.(*KeyConfig).Sealed {
 			ret++
 		}
@@ -229,7 +231,67 @@ func configFactory() interface{} {
 ** CONSTRUCTORS
  */
 
+// NewKey returns a symmecrypt.Key object configured from a number of KeyConfig objects.
+// If several KeyConfigs are supplied, the returned Key will be composite.
+// A composite key encrypts with the latest Key (based on timestamp) and decrypts with any of they keys.
+//
+// If the key configuration specifies it is sealed, the key returned will be wrapped by an unseal mechanism.
+// When the symmecrypt/seal global singleton gets unsealed, the key will become usable instantly. It will return errors in the meantime.
+//
+// The key cipher name is expected to match a KeyFactory that got registered through RegisterCipher().
+// Either use a built-in cipher, or make sure to register a proper factory for this cipher.
+// This KeyFactory will be called, either directly or when the symmecrypt/seal global singleton gets unsealed, if applicable.
+func NewKey(cfgs ...*KeyConfig) (symmecrypt.Key, error) {
+
+	if len(cfgs) == 0 {
+		return nil, errors.New("missing key config")
+	}
+
+	// sort by timestamp: latest (bigger timestamp) first
+	sort.Slice(cfgs, func(i, j int) bool { return cfgs[i].Timestamp > cfgs[j].Timestamp })
+
+	firstNonSealed := !cfgs[0].Sealed
+	comp := symmecrypt.CompositeKey{}
+
+	for _, cfg := range cfgs {
+
+		var ref symmecrypt.Key
+		factory, err := symmecrypt.GetKeyFactory(cfg.Cipher)
+		if err != nil {
+			return nil, err
+		}
+		if cfg.Sealed {
+			// if the first position (used for encryption in composite keys) was not sealed, but other keys used for fallback decryption are sealed
+			// it may be an attack to trigger a reencrypt with a key known by the attacker
+			if firstNonSealed {
+				return nil, errors.New("DANGER! Detected downgrade to non-sealed encryption key. Non-sealed key has higher priority, this looks malicious. Aborting!")
+			}
+			ref = newSealedKey(cfg, factory)
+		} else if cfg.Sequential {
+			ref, err = factory.NewSequentialKey(cfg.Key, cfg.SequentialSalt...)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			ref, err = factory.NewKey(cfg.Key)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		comp = append(comp, ref)
+	}
+
+	// if only a single key config was provided, decapsulate the composite key
+	if len(comp) == 1 {
+		return comp[0], nil
+	}
+
+	return comp, nil
+}
+
 // LoadKey instantiates a new encryption key for a given identifier from the default store in configstore.
+// It retrieves all the necessary data from configstore then calls NewKey().
 //
 // If several keys are found for the identifier, they are sorted by timestamp, and a composite key is returned.
 // The most recent key will be used for encryption, and decryption will be done by any of them.
@@ -246,6 +308,7 @@ func LoadKey(identifier string) (symmecrypt.Key, error) {
 }
 
 // LoadKeyFromStore instantiates a new encryption key for a given identifier from a specific store instance.
+// It retrieves all the necessary data from configstore then calls NewKey().
 //
 // If several keys are found for the identifier, they are sorted by timestamp, and a composite key is returned.
 // The most recent key will be used for encryption, and decryption will be done by any of them.
@@ -277,53 +340,27 @@ func LoadKeyFromStore(identifier string, store *configstore.Store) (symmecrypt.K
 		if err != nil {
 			return nil, err
 		}
-		cfgs = append(cfgs, i.(*KeyConfig))
+		cfg := i.(*KeyConfig)
+		cfgs = append(cfgs, cfg)
 	}
 
-	k, err := NewKey(cfgs...)
+	key, err := NewKey(cfgs...)
 	if err != nil {
-		return nil, err
-	}
-	comp, ok := k.(symmecrypt.CompositeKey)
-	if ok && len(comp) == 1 {
-		return (comp)[0], nil
+		return nil, fmt.Errorf("encryption key '%s': %s", identifier, err)
 	}
 
-	return k, nil
-}
-
-func NewKey(cfgs ...*KeyConfig) (symmecrypt.Key, error) {
-	var comp symmecrypt.CompositeKey
-	var hadNonSealed = false
-
-	for i := range cfgs {
-		var cfg = cfgs[i]
-		var ref symmecrypt.Key
-
-		if cfg.Sealed && hadNonSealed {
-			panic(fmt.Sprintf("encryption key '%s': DANGER! Detected downgrade to non-sealed encryption key. Non-sealed key has higher priority, this looks malicious. Aborting!", cfg.Identifier))
-		} else if !cfg.Sealed {
-			hadNonSealed = true
-		}
-
-		ref, err := newKey(cfg)
-		if err != nil {
-			return nil, err
-		}
-
-		comp = append(comp, ref)
-	}
-
-	return comp, nil
+	return key, nil
 }
 
 // LoadSingleKey instantiates a new encryption key using LoadKey from the default store in configstore without specifying its identifier.
+// It retrieves all the necessary data from configstore then calls NewKey().
 // It will error if several different identifiers are found.
 func LoadSingleKey() (symmecrypt.Key, error) {
 	return LoadSingleKeyFromStore(configstore.DefaultStore)
 }
 
-// LoadSingleKeyFromStore instantiates a new encryption key using LoadKey from a specific store instance without specifying its identifier.
+// LoadSingleKey instantiates a new encryption key using LoadKey from a specific store instance without specifying its identifier.
+// It retrieves all the necessary data from configstore then calls NewKey().
 // It will error if several different identifiers are found.
 func LoadSingleKeyFromStore(store *configstore.Store) (symmecrypt.Key, error) {
 	ident, err := singleKeyIdentifier(store)
@@ -348,27 +385,6 @@ func singleKeyIdentifier(store *configstore.Store) (string, error) {
 	}
 
 	return "", errors.New("ambiguous config: several encryption keys found and no identifier supplied")
-}
-
-func newKey(cfg *KeyConfig) (symmecrypt.Key, error) {
-	factory, err := symmecrypt.GetKeyFactory(cfg.Cipher)
-	if err != nil {
-		return nil, err
-	}
-
-	if cfg.Sealed {
-		return newSealedKey(cfg, factory), nil
-	}
-
-	if cfg.Sequential {
-		k, err := factory.NewSequentialKey(cfg.Key, cfg.SequentialSalt...)
-		if err != nil {
-			return nil, err
-		}
-		return k, nil
-	}
-
-	return factory.NewKey(cfg.Key)
 }
 
 func ConvergentLocator(r io.Reader) (string, error) {
