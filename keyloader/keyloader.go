@@ -3,7 +3,6 @@ package keyloader
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"sort"
 	"strconv"
 	"sync"
@@ -52,13 +51,11 @@ var (
 // - Sealed controls whether the key should be used as-is, or decrypted using symmecrypt/seal
 //   See RegisterCipher() to register a factory. The cipher field should be the same as the factory name.
 type KeyConfig struct {
-	Identifier     string `json:"identifier,omitempty"`
-	Cipher         string `json:"cipher"`
-	Timestamp      int64  `json:"timestamp,omitempty"`
-	Sealed         bool   `json:"sealed,omitempty"`
-	Key            string `json:"key"`
-	Sequential     bool   `json:"sequential,omitempty"`
-	SequentialSalt []byte `json:"salt,omitempty"`
+	Identifier string `json:"identifier,omitempty"`
+	Cipher     string `json:"cipher"`
+	Timestamp  int64  `json:"timestamp,omitempty"`
+	Sealed     bool   `json:"sealed,omitempty"`
+	Key        string `json:"key"`
 }
 
 func (k KeyConfig) String() string {
@@ -149,7 +146,6 @@ func UnsealKey(k *KeyConfig, s *seal.Seal) (*KeyConfig, error) {
 			Timestamp:  k.Timestamp,
 			Cipher:     k.Cipher,
 			Sealed:     k.Sealed,
-			Sequential: k.Sequential,
 		}, nil
 	}
 
@@ -164,7 +160,6 @@ func UnsealKey(k *KeyConfig, s *seal.Seal) (*KeyConfig, error) {
 		Cipher:     k.Cipher,
 		Timestamp:  k.Timestamp,
 		Sealed:     false,
-		Sequential: k.Sequential,
 	}, nil
 }
 
@@ -242,7 +237,6 @@ func configFactory() interface{} {
 // Either use a built-in cipher, or make sure to register a proper factory for this cipher.
 // This KeyFactory will be called, either directly or when the symmecrypt/seal global singleton gets unsealed, if applicable.
 func NewKey(cfgs ...*KeyConfig) (symmecrypt.Key, error) {
-
 	if len(cfgs) == 0 {
 		return nil, errors.New("missing key config")
 	}
@@ -258,7 +252,7 @@ func NewKey(cfgs ...*KeyConfig) (symmecrypt.Key, error) {
 		var ref symmecrypt.Key
 		factory, err := symmecrypt.GetKeyFactory(cfg.Cipher)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("unable to get key factory: %w", err)
 		}
 		if cfg.Sealed {
 			// if the first position (used for encryption in composite keys) was not sealed, but other keys used for fallback decryption are sealed
@@ -267,15 +261,10 @@ func NewKey(cfgs ...*KeyConfig) (symmecrypt.Key, error) {
 				return nil, errors.New("DANGER! Detected downgrade to non-sealed encryption key. Non-sealed key has higher priority, this looks malicious. Aborting!")
 			}
 			ref = newSealedKey(cfg, factory)
-		} else if cfg.Sequential {
-			ref, err = factory.NewSequentialKey(cfg.Key, cfg.SequentialSalt...)
-			if err != nil {
-				return nil, err
-			}
 		} else {
 			ref, err = factory.NewKey(cfg.Key)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("unable to create new key: %w", err)
 			}
 		}
 
@@ -346,7 +335,7 @@ func LoadKeyFromStore(identifier string, store *configstore.Store) (symmecrypt.K
 
 	key, err := NewKey(cfgs...)
 	if err != nil {
-		return nil, fmt.Errorf("encryption key '%s': %s", identifier, err)
+		return nil, fmt.Errorf("encryption key '%s': %v", identifier, err)
 	}
 
 	return key, nil
@@ -385,14 +374,6 @@ func singleKeyIdentifier(store *configstore.Store) (string, error) {
 	}
 
 	return "", errors.New("ambiguous config: several encryption keys found and no identifier supplied")
-}
-
-func ConvergentLocator(r io.Reader) (string, error) {
-	return "", nil
-}
-
-func NewConvergentKey(r io.Reader) (symmecrypt.Key, error) {
-	return nil, nil
 }
 
 // WatchKey instantiates a new hot-reloading encryption key from the default store in configstore.
@@ -506,11 +487,7 @@ func newSealedKey(cfg *KeyConfig, factory symmecrypt.KeyFactory) symmecrypt.Key 
 		if err != nil {
 			panic(fmt.Sprintf("Sealed encryption key '%s' cannot be decrypted: %s", cfg.Identifier, err.Error()))
 		}
-		if decK.Sequential {
-			ret.decryptedKey, err = factory.NewSequentialKey(decK.Key)
-		} else {
-			ret.decryptedKey, err = factory.NewKey(decK.Key)
-		}
+		ret.decryptedKey, err = factory.NewKey(decK.Key)
 
 		if err != nil {
 			panic(fmt.Sprintf("Sealed encryption key '%s' cannot be initialized: %s", cfg.Identifier, err.Error()))

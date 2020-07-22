@@ -8,7 +8,7 @@ import (
 )
 
 func TestEncrypt(t *testing.T) {
-
+	
 	text := []byte("foobar")
 
 	k, err := symmecrypt.NewRandomKey(CipherName)

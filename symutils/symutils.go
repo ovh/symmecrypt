@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha1"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -13,8 +12,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-
-	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/ovh/symmecrypt"
 )
@@ -34,7 +31,7 @@ func RawKey(b []byte, keyLen int) ([]byte, error) {
 		b2 := make([]byte, hex.DecodedLen(len(b)))
 		_, err := hex.Decode(b2, b)
 		if err != nil {
-			return nil, fmt.Errorf("encryption key is too long, but is not a valid hex encoded string: %s", err)
+			return nil, fmt.Errorf("encryption key is too long, but is not a valid hex encoded string: %w", err)
 		}
 		b = b2
 	} else if len(b) == base64.StdEncoding.EncodedLen(keyLen) {
@@ -42,7 +39,7 @@ func RawKey(b []byte, keyLen int) ([]byte, error) {
 		b2 := make([]byte, base64.StdEncoding.DecodedLen(len(b)))
 		n, err := base64.StdEncoding.Decode(b2, b)
 		if err != nil {
-			return nil, fmt.Errorf("encryption key is too long, but is not a valid base64 encoded string: %s", err)
+			return nil, fmt.Errorf("encryption key is too long, but is not a valid base64 encoded string: %w", err)
 		}
 		b = b2[:n] // n may be smaller than DecodedLen(len(b)) because of base64 padding
 	}
@@ -66,19 +63,21 @@ func Random(keyLen int) ([]byte, error) {
  */
 
 type factoryAEAD struct {
-	cipherFactory func([]byte) (cipher.AEAD, error)
+	cipherFactory cipherFactoryFunc
 	keyLen        int
 	mutex         bool
 }
 
+var _ symmecrypt.KeyFactory = new(factoryAEAD)
+
 // NewFactoryAEAD returns a symmecrypt.KeyFactory that can be registered to symmecrypt.RegisterCipher.
 // It accepts a key length and a function that returns a cipher.AEAD.
 // This allows very easy symmecrypt implementations of any cipher that respects the AEAD interface.
-func NewFactoryAEAD(keyLen int, cipherFactory func([]byte) (cipher.AEAD, error)) symmecrypt.KeyFactory {
+func NewFactoryAEAD(keyLen int, cipherFactory cipherFactoryFunc) symmecrypt.KeyFactory {
 	return &factoryAEAD{keyLen: keyLen, cipherFactory: cipherFactory}
 }
 
-func NewFactoryAEADMutex(keyLen int, cipherFactory func([]byte) (cipher.AEAD, error)) symmecrypt.KeyFactory {
+func NewFactoryAEADMutex(keyLen int, cipherFactory cipherFactoryFunc) symmecrypt.KeyFactory {
 	return &factoryAEAD{keyLen: keyLen, cipherFactory: cipherFactory, mutex: true}
 }
 
@@ -104,65 +103,77 @@ func (f *factoryAEAD) NewRandomKey() (symmecrypt.Key, error) {
 	return k, nil
 }
 
-func RandomSalt() []byte {
-	var buff = make([]byte, 8)
-	rand.Read(buff) // nolint
-	return buff
-}
-
 func (f *factoryAEAD) NewSequentialKey(s string, salt ...byte) (symmecrypt.Key, error) {
-	btes, err := RawKey([]byte(s), f.keyLen)
+	k, err := NewKeySequentialAEAD([]byte(s), f.keyLen, salt, f.cipherFactory)
 	if err != nil {
 		return nil, err
 	}
-	k, err := f.NewKey(string(btes))
-	if err != nil {
-		return nil, err
-	}
-	km := &KeyMutex{
-		Key: &KeySequential{
-			k:    k.(*KeyAEAD),
-			salt: salt,
-		},
-	}
-	return km, nil
+	k = &KeyMutex{Key: k}
+	return k, nil
 }
 
 // KeyAEAD is a base implementation of a symmecrypt key that uses AEAD ciphers.
 // It transforms any AEAD cipher factory into a full-fledged symmecrypt key implementation.
 type KeyAEAD struct {
 	key           []byte
-	cipherFactory func([]byte) (cipher.AEAD, error)
+	cipherFactory cipherFactoryFunc
+	sequential    bool
+	counter       uint32
+	salt          []byte
 }
 
 // NewKeyAEAD needs the key representation (raw or hex), desired length, and an AEAD cipher factory.
-func NewKeyAEAD(rawkey []byte, keyLen int, factory func([]byte) (cipher.AEAD, error)) (symmecrypt.Key, error) {
+type cipherFactoryFunc func([]byte) (cipher.AEAD, error)
+
+func NewKeyAEAD(rawkey []byte, keyLen int, factory cipherFactoryFunc) (symmecrypt.Key, error) {
 	raw, err := RawKey(rawkey, keyLen)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to create AEAD key: %w", err)
 	}
-	return &KeyAEAD{key: raw, cipherFactory: factory}, nil
+	k := &KeyAEAD{key: raw, cipherFactory: factory}
+	return k, nil
+}
+
+func NewKeySequentialAEAD(rawkey []byte, keyLen int, salt []byte, factory cipherFactoryFunc) (symmecrypt.Key, error) {
+	raw, err := RawKey(rawkey, keyLen)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create AEAD key: %w", err)
+	}
+	k := &KeyAEAD{key: raw, cipherFactory: factory, sequential: true, salt: salt}
+	return k, nil
 }
 
 // NewRandomKeyAEAD needs the desired key length, and an AEAD cipher factory.
-func NewRandomKeyAEAD(keyLen int, factory func([]byte) (cipher.AEAD, error)) (symmecrypt.Key, error) {
+func NewRandomKeyAEAD(keyLen int, factory cipherFactoryFunc) (symmecrypt.Key, error) {
 	b, err := Random(keyLen)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to create AEAD key: %w", err)
 	}
 	return NewKeyAEAD(b, keyLen, factory)
 }
 
+func (b *KeyAEAD) incrementCounter() {
+	b.counter++
+}
+
 // Encrypt arbitrary data. Extra data can be passed for MAC.
-func (b KeyAEAD) Encrypt(text []byte, extra ...[]byte) ([]byte, error) {
+func (b *KeyAEAD) Encrypt(text []byte, extra ...[]byte) ([]byte, error) {
 	ciph, err := b.cipherFactory(b.key)
 	if err != nil {
 		return nil, err
 	}
 
-	nonce := make([]byte, ciph.NonceSize(), ciph.NonceSize()+ciph.Overhead()+len(text)) // Extra capacity to append ciphertext without realloc
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, err
+	var nonce []byte
+	if b.sequential {
+		defer b.incrementCounter()
+		nonce = make([]byte, ciph.NonceSize(), ciph.NonceSize()+ciph.Overhead()+len(b.salt)+len(text)) // Extra capacity to append ciphertext without realloc
+		offset := copy(nonce, b.salt)
+		binary.PutUvarint(nonce[offset:], uint64(b.counter))
+	} else {
+		nonce = make([]byte, ciph.NonceSize(), ciph.NonceSize()+ciph.Overhead()+len(text)) // Extra capacity to append ciphertext without realloc
+		if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+			return nil, err
+		}
 	}
 
 	var extraData []byte
@@ -287,68 +298,8 @@ func (k *KeyMutex) String() (string, error) {
 	return k.Key.String()
 }
 
-type KeySequential struct {
-	k       *KeyAEAD
-	counter uint32
-	salt    []byte
-}
-
-func (k *KeySequential) incrementCounter() {
-	k.counter++
-}
-
-func (k *KeySequential) Encrypt(t []byte, extras ...[]byte) ([]byte, error) {
-	defer k.incrementCounter()
-
-	ciph, err := k.k.cipherFactory(k.k.key)
-	if err != nil {
-		return nil, err
-	}
-
-	nonce := make([]byte, ciph.NonceSize(), ciph.NonceSize()+ciph.Overhead()+len(k.salt)+len(t)) // Extra capacity to append ciphertext without realloc
-	offset := copy(nonce, k.salt)
-	binary.PutUvarint(nonce[offset:], uint64(k.counter))
-
-	var extraData []byte
-	for _, e := range extras {
-		extraData = append(extraData, e...)
-	}
-
-	ciphertext := ciph.Seal(nil, nonce, t, extraData)
-
-	return append(nonce, ciphertext...), nil
-}
-
-func (k *KeySequential) Decrypt(t []byte, extras ...[]byte) ([]byte, error) {
-	return k.k.Decrypt(t, extras...)
-}
-
-func (k *KeySequential) EncryptMarshal(i interface{}, extras ...[]byte) (string, error) {
-	serialized, err := json.Marshal(i)
-	if err != nil {
-		return "", err
-	}
-	ciphered, err := k.Encrypt(serialized, extras...)
-	if err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(ciphered), nil
-}
-
-func (k *KeySequential) DecryptMarshal(s string, i interface{}, extras ...[]byte) error {
-	return k.k.DecryptMarshal(s, i, extras...)
-}
-
-func (k *KeySequential) Wait() {
-	k.k.Wait()
-}
-
-func (k *KeySequential) String() (string, error) {
-	return k.k.String()
-}
-
-// Locator returns the result of PBKDF2. PBKDF2 is a key derivation function
-// https://en.wikipedia.org/wiki/PBKDF2
-func Locator(s string, salt ...byte) string {
-	return hex.EncodeToString(pbkdf2.Key([]byte(s), salt, 4096, 32, sha1.New))
+func RandomSalt() string {
+	var buff = make([]byte, 8)
+	rand.Read(buff) // nolint
+	return string(buff)
 }

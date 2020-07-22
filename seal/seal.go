@@ -72,7 +72,7 @@ func InitFromStore(onChange func(*Seal), s *configstore.Store) error {
 		for range s.Watch() {
 			newSeal, err := NewSealFromStore(s)
 			if err != nil {
-				symmecrypt.LogErrorFunc("symmecrypt/seal: configuration fetch error: %s", err)
+				symmecrypt.LogErrorFunc("symmecrypt/seal: configuration fetch error: %w", err)
 				continue
 			}
 			if diff(seal, newSeal) && onChange != nil {
@@ -253,7 +253,7 @@ func (r *Seal) AddShard(s string) (bool, error) {
 
 	k, err := symmecrypt.NewKey(encryptionCipher, ik.Key)
 	if err != nil {
-		return r.reset(errors.NewBadRequest(nil, fmt.Sprintf("embedded encryption key is invalid: %s", err)))
+		return r.reset(errors.NewBadRequest(nil, fmt.Sprintf("embedded encryption key is invalid: %v", err)))
 	}
 
 	if r.unsealedCh != nil {
