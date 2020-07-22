@@ -28,7 +28,7 @@ type Key interface {
 type KeyFactory interface {
 	NewKey(string) (Key, error)
 	NewRandomKey() (Key, error)
-	NewSequentialKey(string, ...byte) (Key, error)
+	NewSequenceKey(string, ...byte) (Key, error)
 }
 
 // CompositeKey provides a keyring mechanism: encrypt with first, decrypt with _any_

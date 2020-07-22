@@ -50,7 +50,7 @@ func (f hmacFactory) NewRandomKey() (symmecrypt.Key, error) {
 	return Key(b), nil
 }
 
-func (f hmacFactory) NewSequentialKey(string, ...byte) (symmecrypt.Key, error) {
+func (f hmacFactory) NewSequenceKey(string, ...byte) (symmecrypt.Key, error) {
 	return nil, errors.New("Sequential key not supported by this factory")
 }
 

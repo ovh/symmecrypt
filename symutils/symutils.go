@@ -103,7 +103,7 @@ func (f *factoryAEAD) NewRandomKey() (symmecrypt.Key, error) {
 	return k, nil
 }
 
-func (f *factoryAEAD) NewSequentialKey(s string, salt ...byte) (symmecrypt.Key, error) {
+func (f *factoryAEAD) NewSequenceKey(s string, salt ...byte) (symmecrypt.Key, error) {
 	k, err := NewKeySequentialAEAD([]byte(s), f.keyLen, salt, f.cipherFactory)
 	if err != nil {
 		return nil, err

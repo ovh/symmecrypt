@@ -41,7 +41,7 @@ func NewKey(key string, cfgs ...KeyConfig) (symmecrypt.Key, error) {
 		}
 
 		if len(cfg.Salt) == 0 {
-			ref, err = factory.NewSequentialKey(key)
+			ref, err = factory.NewSequenceKey(key)
 			if err != nil {
 				return nil, fmt.Errorf("unable to create new key: %w", err)
 			}
@@ -49,7 +49,7 @@ func NewKey(key string, cfgs ...KeyConfig) (symmecrypt.Key, error) {
 		} else {
 			for j := range cfg.Salt {
 				salt := &cfg.Salt[j]
-				ref, err = factory.NewSequentialKey(key, []byte(salt.Value)...)
+				ref, err = factory.NewSequenceKey(key, []byte(salt.Value)...)
 				if err != nil {
 					return nil, fmt.Errorf("unable to create new key: %w", err)
 				}
