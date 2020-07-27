@@ -23,30 +23,33 @@ import (
 // RawKey accepts either a raw byte array of len keyLen, or a hex-encoded representation of len keyLen*2.
 // It always returns an array of raw bytes of len keyLen.
 func RawKey(b []byte, keyLen int) ([]byte, error) {
-	if len(b) == 0 {
+	switch len(b) {
+	case 0:
 		return nil, errors.New("empty encryption key")
-	}
-	if len(b) == hex.EncodedLen(keyLen) {
-		// Hex representation? decode it
+
+	case keyLen:
+		return b, nil
+
+	case hex.EncodedLen(keyLen): // Hex representation? decode it
 		b2 := make([]byte, hex.DecodedLen(len(b)))
 		_, err := hex.Decode(b2, b)
 		if err != nil {
 			return nil, fmt.Errorf("encryption key is too long, but is not a valid hex encoded string: %w", err)
 		}
-		b = b2
-	} else if len(b) == base64.StdEncoding.EncodedLen(keyLen) {
-		// base64 representation? decode it!
+		return b2, nil
+
+	case base64.StdEncoding.EncodedLen(keyLen): // base64 representation? decode it!
 		b2 := make([]byte, base64.StdEncoding.DecodedLen(len(b)))
 		n, err := base64.StdEncoding.Decode(b2, b)
 		if err != nil {
 			return nil, fmt.Errorf("encryption key is too long, but is not a valid base64 encoded string: %w", err)
 		}
-		b = b2[:n] // n may be smaller than DecodedLen(len(b)) because of base64 padding
-	}
-	if len(b) != keyLen {
+		return b2[:n], nil // n may be smaller than DecodedLen(len(b)) because of base64 padding
+
+	default:
 		return nil, fmt.Errorf("encryption key: incorrect length: expected %d, got %d", keyLen, len(b))
+
 	}
-	return b, nil
 }
 
 // Random returns a random array of raw bytes of len keyLen.
@@ -56,6 +59,15 @@ func Random(keyLen int) ([]byte, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+// MustRandomString returns a random string of len keyLen.
+func MustRandomString(keyLen int) string {
+	b := make([]byte, keyLen)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		panic(err)
+	}
+	return string(b)
 }
 
 /*
@@ -81,6 +93,10 @@ func NewFactoryAEADMutex(keyLen int, cipherFactory cipherFactoryFunc) symmecrypt
 	return &factoryAEAD{keyLen: keyLen, cipherFactory: cipherFactory, mutex: true}
 }
 
+func (f *factoryAEAD) KeyLen() int {
+	return f.keyLen
+}
+
 func (f *factoryAEAD) NewKey(s string) (symmecrypt.Key, error) {
 	k, err := NewKeyAEAD([]byte(s), f.keyLen, f.cipherFactory)
 	if err != nil {
@@ -103,8 +119,21 @@ func (f *factoryAEAD) NewRandomKey() (symmecrypt.Key, error) {
 	return k, nil
 }
 
-func (f *factoryAEAD) NewSequenceKey(s string, salt ...byte) (symmecrypt.Key, error) {
-	k, err := NewKeySequentialAEAD([]byte(s), f.keyLen, salt, f.cipherFactory)
+func (f *factoryAEAD) NewSequenceKey(s string) (symmecrypt.Key, error) {
+	k, err := NewKeySequentialAEAD([]byte(s), f.keyLen, f.cipherFactory)
+	if err != nil {
+		return nil, err
+	}
+	k = &KeyMutex{Key: k}
+	return k, nil
+}
+
+func (f *factoryAEAD) NewRandomSequenceKey() (symmecrypt.Key, error) {
+	b, err := Random(f.keyLen)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create AEAD key: %w", err)
+	}
+	k, err := NewKeySequentialAEAD(b, f.keyLen, f.cipherFactory)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +148,6 @@ type KeyAEAD struct {
 	cipherFactory cipherFactoryFunc
 	sequential    bool
 	counter       uint32
-	salt          []byte
 }
 
 // NewKeyAEAD needs the key representation (raw or hex), desired length, and an AEAD cipher factory.
@@ -134,12 +162,12 @@ func NewKeyAEAD(rawkey []byte, keyLen int, factory cipherFactoryFunc) (symmecryp
 	return k, nil
 }
 
-func NewKeySequentialAEAD(rawkey []byte, keyLen int, salt []byte, factory cipherFactoryFunc) (symmecrypt.Key, error) {
+func NewKeySequentialAEAD(rawkey []byte, keyLen int, factory cipherFactoryFunc) (symmecrypt.Key, error) {
 	raw, err := RawKey(rawkey, keyLen)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create AEAD key: %w", err)
 	}
-	k := &KeyAEAD{key: raw, cipherFactory: factory, sequential: true, salt: salt}
+	k := &KeyAEAD{key: raw, cipherFactory: factory, sequential: true}
 	return k, nil
 }
 
@@ -163,14 +191,11 @@ func (b *KeyAEAD) Encrypt(text []byte, extra ...[]byte) ([]byte, error) {
 		return nil, err
 	}
 
-	var nonce []byte
+	var nonce = make([]byte, ciph.NonceSize(), ciph.NonceSize()+ciph.Overhead()+len(text)) // Extra capacity to append ciphertext without realloc
 	if b.sequential {
 		defer b.incrementCounter()
-		nonce = make([]byte, ciph.NonceSize(), ciph.NonceSize()+ciph.Overhead()+len(b.salt)+len(text)) // Extra capacity to append ciphertext without realloc
-		offset := copy(nonce, b.salt)
-		binary.PutUvarint(nonce[offset:], uint64(b.counter))
+		binary.PutUvarint(nonce, uint64(b.counter))
 	} else {
-		nonce = make([]byte, ciph.NonceSize(), ciph.NonceSize()+ciph.Overhead()+len(text)) // Extra capacity to append ciphertext without realloc
 		if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 			return nil, err
 		}

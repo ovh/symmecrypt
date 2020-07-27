@@ -34,6 +34,10 @@ func init() {
 
 type hmacFactory struct{}
 
+func (f hmacFactory) KeyLen() int {
+	return KeyLen
+}
+
 func (f hmacFactory) NewKey(s string) (symmecrypt.Key, error) {
 	k, err := symutils.RawKey([]byte(s), KeyLen)
 	if err != nil {
@@ -50,7 +54,11 @@ func (f hmacFactory) NewRandomKey() (symmecrypt.Key, error) {
 	return Key(b), nil
 }
 
-func (f hmacFactory) NewSequenceKey(string, ...byte) (symmecrypt.Key, error) {
+func (f hmacFactory) NewSequenceKey(string) (symmecrypt.Key, error) {
+	return nil, errors.New("Sequential key not supported by this factory")
+}
+
+func (f hmacFactory) NewRandomSequenceKey() (symmecrypt.Key, error) {
 	return nil, errors.New("Sequential key not supported by this factory")
 }
 

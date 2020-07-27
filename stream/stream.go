@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/ovh/symmecrypt"
+	_ "github.com/ovh/symmecrypt/keyloader"
 )
 
 var _ io.WriteCloser = new(chunksWriter)
@@ -25,26 +26,16 @@ func (w *chunksWriter) encryptCurrentChunk() (int, error) {
 	}
 	currentChunk := w.currentChunkWriter.Bytes()
 	// first step: encrypt the chunks
-	var encChunk bytes.Buffer
-	encWriter := symmecrypt.NewWriter(&encChunk, w.k, w.extras...)
-	n, err := encWriter.Write(currentChunk)
+	btes, err := w.k.Encrypt(currentChunk, w.extras...)
 	if err != nil {
-		return n, err
+		return len(currentChunk), err
 	}
-
-	// call close to effectivelly encrypt all the things
-	if err := encWriter.Close(); err != nil {
-		return n, err
-	}
-
-	// get the encrypted content
-	btes := encChunk.Bytes()
 
 	// then write into the destination writer the len of the encrypted chunks
-	headerBuf := make([]byte, binary.MaxVarintLen64)
-	binary.PutVarint(headerBuf, int64(len(btes)))
+	headerBuf := make([]byte, binary.MaxVarintLen32)
+	binary.PutUvarint(headerBuf, uint64(len(btes)))
 	if _, err := w.destination.Write(headerBuf); err != nil {
-		return n, err
+		return len(currentChunk), err
 	}
 
 	// then write into the desitination writer the encrypted chunks
@@ -54,7 +45,7 @@ func (w *chunksWriter) encryptCurrentChunk() (int, error) {
 	w.currentChunkBytesWritten = 0
 	w.currentChunkWriter = nil
 
-	return n, err
+	return len(currentChunk), err
 }
 
 func (w *chunksWriter) Write(p []byte) (int, error) {
@@ -63,7 +54,7 @@ func (w *chunksWriter) Write(p []byte) (int, error) {
 		w.currentChunkBytesWritten = 0
 	}
 
-	if w.currentChunkBytesWritten == w.chunkSize {
+	if w.currentChunkBytesWritten == w.chunkSize { // probably remove
 		return w.encryptCurrentChunk()
 	}
 
@@ -80,7 +71,7 @@ func (w *chunksWriter) Write(p []byte) (int, error) {
 	if len(p) < x {
 		n, err := w.currentChunkWriter.Write(p)
 		w.currentChunkBytesWritten += int(n)
-		return int(n), err
+		return n, err
 	} else {
 		p1 := p[:x]
 		p2 := p[x:]
@@ -116,6 +107,7 @@ var _ io.Reader = new(chunksReader)
 type chunksReader struct {
 	src                   io.Reader
 	k                     symmecrypt.Key
+	uncappedK             symmecrypt.Key
 	extras                [][]byte
 	chunkSize             int
 	currentChunk          io.Reader
@@ -135,12 +127,12 @@ func NewReader(r io.Reader, k symmecrypt.Key, chunkSize int, extras ...[]byte) i
 
 func (r *chunksReader) readNewChunk() error {
 	// read the chunksize
-	headerBtes := make([]byte, binary.MaxVarintLen64)
+	headerBtes := make([]byte, binary.MaxVarintLen32)
 	if _, err := r.src.Read(headerBtes); err != nil { // READING THE CLEAR HEADER FROM THE ENCRYPTED SOURCE
 		return err
 	}
 
-	n, err := binary.ReadVarint(bytes.NewReader(headerBtes)) // READ THE HEADER BUFFER
+	n, err := binary.ReadUvarint(bytes.NewReader(headerBtes)) // READ THE HEADER BUFFER
 	if err != nil {
 		return err
 	}
@@ -152,9 +144,21 @@ func (r *chunksReader) readNewChunk() error {
 		return err
 	}
 
-	kr, err := symmecrypt.NewReaderFrom(btes, r.k, r.extras...) // PREPARE THE CLEAR BUFFER OF THE CHUNK CONTENT
-	if err != nil {
-		return err
+	var kr io.Reader
+	if r.uncappedK == nil {
+		kr, err = symmecrypt.NewReaderFrom(btes, r.k, r.extras...)
+		if err != nil {
+			return err
+		}
+		skr := kr.(*symmecrypt.Reader)
+		if skr.EffectiveDecryptionKey != nil {
+			r.uncappedK = skr.EffectiveDecryptionKey
+		}
+	} else {
+		kr, err = symmecrypt.NewReaderFrom(btes, r.uncappedK, r.extras...)
+		if err != nil {
+			return err
+		}
 	}
 
 	r.currentChunk = kr

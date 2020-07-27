@@ -28,7 +28,9 @@ type Key interface {
 type KeyFactory interface {
 	NewKey(string) (Key, error)
 	NewRandomKey() (Key, error)
-	NewSequenceKey(string, ...byte) (Key, error)
+	NewSequenceKey(string) (Key, error)
+	NewRandomSequenceKey() (Key, error)
+	KeyLen() int
 }
 
 // CompositeKey provides a keyring mechanism: encrypt with first, decrypt with _any_
@@ -106,11 +108,22 @@ func (c CompositeKey) Encrypt(text []byte, extra ...[]byte) ([]byte, error) {
 	return c[0].Encrypt(text, extra...)
 }
 
+func (c CompositeKey) DecryptUncap(text []byte, extra ...[]byte) (Key, []byte, error) {
+	for _, k := range c {
+		b, err := k.Decrypt(text, extra...)
+		if err == nil {
+			return k, b, nil
+		}
+	}
+	return nil, nil, errors.New("failed to decrypt with all keys")
+}
+
 // Decrypt arbitrary data with _any_ key
 func (c CompositeKey) Decrypt(text []byte, extra ...[]byte) ([]byte, error) {
 	for _, k := range c {
 		b, err := k.Decrypt(text, extra...)
 		if err == nil {
+
 			return b, nil
 		}
 	}
@@ -243,17 +256,28 @@ func (sw *writer) Write(b []byte) (int, error) {
 	return sw.currentSecret.Write(b)
 }
 
-type reader struct {
+type Reader struct {
 	io.Reader
+	EffectiveDecryptionKey Key
 }
 
 func NewReaderFrom(buf []byte, k Key, extra ...[]byte) (io.Reader, error) {
-	decData, err := k.Decrypt(buf, extra...)
+	var decData []byte
+	var err error
+	var reader = new(Reader)
+
+	compositeKey, is := k.(CompositeKey)
+	if is {
+		reader.EffectiveDecryptionKey, decData, err = compositeKey.DecryptUncap(buf, extra...)
+	} else {
+		decData, err = k.Decrypt(buf, extra...)
+	}
+
 	if err != nil {
 		return nil, err
 	}
-	// instantiates a bytes reader
-	reader := &reader{bytes.NewReader(decData)}
+
+	reader.Reader = bytes.NewReader(decData)
 	return reader, nil
 }
 
