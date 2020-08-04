@@ -80,9 +80,9 @@ func KeyFromHash(h hash.Hash, secretValue string, keylen int) string {
 	return hex.EncodeToString(k)
 }
 
-// locator returns the result of PBKDF2. PBKDF2 is a key derivation function
+// Locator returns the result of PBKDF2. PBKDF2 is a key derivation function
 // https://en.wikipedia.org/wiki/PBKDF2
-func locator(s string, salt string) (string, error) {
+func Locator(s string, salt string) (string, error) {
 	if len(salt) < 8 {
 		return "", errors.New("at least 8 Bytes are recommanded for the salt")
 	}
@@ -92,7 +92,7 @@ func locator(s string, salt string) (string, error) {
 // MustLocator returns the result of PBKDF2. PBKDF2 is a key derivation function
 // If the salt doesnt respect the PBKDF2 RFC, it will panic
 func MustLocator(s string, salt string) string {
-	l, err := locator(s, salt)
+	l, err := Locator(s, salt)
 	if err != nil {
 		panic(err)
 	}
@@ -108,7 +108,7 @@ func NewLocator(h hash.Hash, cfgs ...ConvergentEncryptionConfig) (string, error)
 	sort.Slice(cfgs, func(i, j int) bool { return cfgs[i].Timestamp > cfgs[j].Timestamp })
 	sha512_256 := h.Sum(nil)
 	s := hex.EncodeToString(sha512_256)
-	l, err := locator(s, cfgs[0].LocatorSalt)
+	l, err := Locator(s, cfgs[0].LocatorSalt)
 	if err != nil {
 		return "", err
 	}
