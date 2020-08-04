@@ -88,7 +88,14 @@ func (w *chunksWriter) Write(p []byte) (int, error) {
 
 func (w *chunksWriter) Close() error {
 	_, err := w.encryptCurrentChunk()
-	return err
+	if err != nil {
+		return err
+	}
+	closer, is := w.destination.(io.Closer)
+	if !is {
+		return nil
+	}
+	return closer.Close()
 }
 
 // NewWriter needs documentation and must be closed
