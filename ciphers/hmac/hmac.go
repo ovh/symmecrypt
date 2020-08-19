@@ -54,12 +54,14 @@ func (f hmacFactory) NewRandomKey() (symmecrypt.Key, error) {
 	return Key(b), nil
 }
 
-func (f hmacFactory) NewSequenceKey(string) (symmecrypt.Key, error) {
-	return nil, errors.New("Sequential key not supported by this factory")
+func (f hmacFactory) NewSequenceKey(s string) (symmecrypt.Key, error) {
+	// the hmac cipher doesnt use a nonce, so a sequence key == a regular key
+	return f.NewKey(s)
 }
 
 func (f hmacFactory) NewRandomSequenceKey() (symmecrypt.Key, error) {
-	return nil, errors.New("Sequential key not supported by this factory")
+	// the hmac cipher doesnt use a nonce, so a sequence key == a regular key
+	return f.NewRandomKey()
 }
 
 // Key is a simple key which uses plain data + HMAC-sha512 for authentication
