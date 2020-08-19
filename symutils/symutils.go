@@ -120,7 +120,7 @@ func (f *factoryAEAD) NewRandomKey() (symmecrypt.Key, error) {
 }
 
 func (f *factoryAEAD) NewSequenceKey(s string) (symmecrypt.Key, error) {
-	k, err := NewKeySequentialAEAD([]byte(s), f.keyLen, f.cipherFactory)
+	k, err := NewKeySequenceAEAD([]byte(s), f.keyLen, f.cipherFactory)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +133,7 @@ func (f *factoryAEAD) NewRandomSequenceKey() (symmecrypt.Key, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to create AEAD key: %w", err)
 	}
-	k, err := NewKeySequentialAEAD(b, f.keyLen, f.cipherFactory)
+	k, err := NewKeySequenceAEAD(b, f.keyLen, f.cipherFactory)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func NewKeyAEAD(rawkey []byte, keyLen int, factory cipherFactoryFunc) (symmecryp
 	return k, nil
 }
 
-func NewKeySequentialAEAD(rawkey []byte, keyLen int, factory cipherFactoryFunc) (symmecrypt.Key, error) {
+func NewKeySequenceAEAD(rawkey []byte, keyLen int, factory cipherFactoryFunc) (symmecrypt.Key, error) {
 	raw, err := RawKey(rawkey, keyLen)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create AEAD key: %w", err)

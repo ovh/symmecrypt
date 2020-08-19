@@ -470,7 +470,7 @@ func TestSequentialEncryption(t *testing.T) {
 		Cipher: aesgcm.CipherName,
 	}
 
-	// Instantiate a Sequential key from the sha512
+	// Instantiate a Sequence key from the sha512
 	k, err := convergent.NewKey(hash, cfg)
 	require.NoError(t, err)
 	require.NotNil(t, k)

@@ -9,6 +9,7 @@ import (
 	"github.com/ovh/symmecrypt/ciphers/aesgcm"
 	"github.com/ovh/symmecrypt/ciphers/aespmacsiv"
 	"github.com/ovh/symmecrypt/ciphers/chacha20poly1305"
+	"github.com/ovh/symmecrypt/ciphers/hmac"
 	"github.com/ovh/symmecrypt/ciphers/xchacha20poly1305"
 	"github.com/ovh/symmecrypt/convergent"
 	"github.com/ovh/symmecrypt/symutils"
@@ -38,7 +39,7 @@ func TestConvergentEncryption(t *testing.T) {
 		aespmacsiv.CipherName,
 		chacha20poly1305.CipherName,
 		xchacha20poly1305.CipherName,
-		// we don't test hmac because it doesn't support sequential encryption
+		hmac.CipherName,
 	}
 	for _, s := range ciphers {
 		t.Run(s, func(t *testing.T) {

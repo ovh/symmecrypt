@@ -256,31 +256,6 @@ func (sw *writer) Write(b []byte) (int, error) {
 	return sw.currentSecret.Write(b)
 }
 
-type Reader struct {
-	io.Reader
-	EffectiveDecryptionKey Key
-}
-
-func NewReaderFrom(buf []byte, k Key, extra ...[]byte) (io.Reader, error) {
-	var decData []byte
-	var err error
-	var reader = new(Reader)
-
-	compositeKey, is := k.(CompositeKey)
-	if is {
-		reader.EffectiveDecryptionKey, decData, err = compositeKey.DecryptUncap(buf, extra...)
-	} else {
-		decData, err = k.Decrypt(buf, extra...)
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	reader.Reader = bytes.NewReader(decData)
-	return reader, nil
-}
-
 // NewReader returns a new Reader which is able to decrypt the source io.Reader.
 // It returns an error if the source io.Reader is unreadable with the provided Key and extras.
 func NewReader(r io.Reader, k Key, extra ...[]byte) (io.Reader, error) {
@@ -292,5 +267,9 @@ func NewReader(r io.Reader, k Key, extra ...[]byte) (io.Reader, error) {
 	}
 	// Decrypt all the buffer
 	btes := buffer.Bytes()
-	return NewReaderFrom(btes, k, extra...)
+	decData, err := k.Decrypt(btes, extra...)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(decData), nil
 }

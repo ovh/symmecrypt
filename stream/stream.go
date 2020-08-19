@@ -151,24 +151,26 @@ func (r *chunksReader) readNewChunk() error {
 		return err
 	}
 
-	var kr io.Reader
+	var clearContent []byte
+
 	if r.uncappedK == nil {
-		kr, err = symmecrypt.NewReaderFrom(btes, r.k, r.extras...)
+		var err error
+		compositeKey, is := r.k.(symmecrypt.CompositeKey)
+		if is {
+			r.uncappedK, clearContent, err = compositeKey.DecryptUncap(btes, r.extras...)
+		} else {
+			clearContent, err = r.k.Decrypt(btes, r.extras...)
+		}
 		if err != nil {
 			return err
 		}
-		skr := kr.(*symmecrypt.Reader)
-		if skr.EffectiveDecryptionKey != nil {
-			r.uncappedK = skr.EffectiveDecryptionKey
-		}
 	} else {
-		kr, err = symmecrypt.NewReaderFrom(btes, r.uncappedK, r.extras...)
+		clearContent, err = r.uncappedK.Decrypt(btes, r.extras...)
 		if err != nil {
 			return err
 		}
 	}
-
-	r.currentChunk = kr
+	r.currentChunk = bytes.NewReader(clearContent)
 	r.currentChunkReadBytes = 0
 	return nil
 }
