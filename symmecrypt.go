@@ -108,6 +108,9 @@ func (c CompositeKey) Encrypt(text []byte, extra ...[]byte) ([]byte, error) {
 	return c[0].Encrypt(text, extra...)
 }
 
+// DecryptUncap decrypts abitrary data with _any_ key, and returns the key that was used.
+// Useful for batch processes which may want to repeat decrypt operations using the same key without
+// going through the key ring logic each time.
 func (c CompositeKey) DecryptUncap(text []byte, extra ...[]byte) (Key, []byte, error) {
 	for _, k := range c {
 		b, err := k.Decrypt(text, extra...)
