@@ -2,14 +2,13 @@ package keyloader
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/juju/errors"
 
 	"github.com/ovh/configstore"
 	"github.com/ovh/symmecrypt"
@@ -500,7 +499,7 @@ func newSealedKey(cfg *KeyConfig, factory symmecrypt.KeyFactory) symmecrypt.Key 
 
 func (s *sealedKey) Key() (symmecrypt.Key, error) {
 	if atomic.LoadUint32(&s.decrypted) == 0 {
-		return nil, errors.NewMethodNotAllowed(nil, "encryption key is sealed")
+		return nil, errors.New("encryption key is sealed")
 	}
 	return s.decryptedKey, nil
 }

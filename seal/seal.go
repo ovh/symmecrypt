@@ -4,11 +4,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
 	sssa "github.com/SSSaaS/sssa-golang"
-	"github.com/juju/errors"
 	"github.com/ovh/configstore"
 	"github.com/ovh/symmecrypt"
 	"github.com/ovh/symmecrypt/ciphers/aesgcm"
@@ -207,18 +207,18 @@ func WaitUnseal() bool {
 func (r *Seal) AddShard(s string) (bool, error) {
 
 	if r == nil {
-		return false, errors.NewBadRequest(nil, "no shamir root!")
+		return false, errors.New("no shamir root!")
 	}
 
 	r.mut.Lock()
 	defer r.mut.Unlock()
 
 	if r.encryptionKey != nil {
-		return false, errors.NewBadRequest(nil, "already unsealed!")
+		return false, errors.New("already unsealed!")
 	}
 
 	if !sssa.IsValidShare(s) {
-		return false, errors.NewBadRequest(nil, "invalid shard")
+		return false, errors.New("invalid shard")
 	}
 
 	r.shards[s] = struct{}{}
@@ -237,23 +237,23 @@ func (r *Seal) AddShard(s string) (bool, error) {
 
 	plain, err := combine(shards)
 	if err != nil {
-		return r.reset(errors.NewBadRequest(nil, "bad shamir shards: invalid decoded payload"))
+		return r.reset(errors.New("bad shamir shards: invalid decoded payload"))
 	}
 
 	ik := &internalKey{}
 
 	err = json.Unmarshal([]byte(plain), ik)
 	if err != nil {
-		return r.reset(errors.NewBadRequest(nil, "bad shamir shards: invalid decoded payload"))
+		return r.reset(errors.New("bad shamir shards: invalid decoded payload"))
 	}
 
 	if ik.Nonce != r.Nonce {
-		return r.reset(errors.NewBadRequest(nil, "old shamir shards: nonce is outdated"))
+		return r.reset(errors.New("old shamir shards: nonce is outdated"))
 	}
 
 	k, err := symmecrypt.NewKey(encryptionCipher, ik.Key)
 	if err != nil {
-		return r.reset(errors.NewBadRequest(nil, fmt.Sprintf("embedded encryption key is invalid: %v", err)))
+		return r.reset(fmt.Errorf("embedded encryption key is invalid: %v", err))
 	}
 
 	if r.unsealedCh != nil {
@@ -274,14 +274,14 @@ func combine(shards []string) (string, error) {
 func (r *Seal) Encrypt(b []byte, extra ...[]byte) (string, error) {
 
 	if r == nil {
-		return "", errors.NewBadRequest(nil, "seal is not initialized")
+		return "", errors.New("seal is not initialized")
 	}
 
 	r.mut.Lock()
 	defer r.mut.Unlock()
 
 	if r.encryptionKey == nil {
-		return "", errors.NewBadRequest(nil, "seal is still sealed!")
+		return "", errors.New("seal is still sealed!")
 	}
 
 	bEnc, err := r.encryptionKey.Encrypt(b, extra...)
@@ -295,19 +295,19 @@ func (r *Seal) Encrypt(b []byte, extra ...[]byte) (string, error) {
 func (r *Seal) Decrypt(s string, extra ...[]byte) ([]byte, error) {
 
 	if r == nil {
-		return nil, errors.NewBadRequest(nil, "seal is not initialized")
+		return nil, errors.New("seal is not initialized")
 	}
 
 	r.mut.Lock()
 	defer r.mut.Unlock()
 
 	if r.encryptionKey == nil {
-		return nil, errors.NewBadRequest(nil, "seal is still sealed!")
+		return nil, errors.New("seal is still sealed!")
 	}
 
 	bEnc, err := hex.DecodeString(s)
 	if err != nil {
-		return nil, errors.NewBadRequest(nil, "invalid hex")
+		return nil, errors.New("invalid hex")
 	}
 	retBytes, err := r.encryptionKey.Decrypt(bEnc, extra...)
 	return retBytes, err

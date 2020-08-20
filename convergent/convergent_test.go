@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/ovh/configstore"
 	"github.com/ovh/symmecrypt/ciphers/aesgcm"
 	"github.com/ovh/symmecrypt/ciphers/aespmacsiv"
 	"github.com/ovh/symmecrypt/ciphers/chacha20poly1305"
@@ -26,7 +30,8 @@ func TestKeyFromHash(t *testing.T) {
 	require.NoError(t, err)
 
 	baseSecretValue := symutils.MustRandomString(8)
-	k := convergent.KeyFromHash(h, baseSecretValue, 32)
+	k, err := convergent.KeyFromHash(h, baseSecretValue, 32)
+	require.NoError(t, err)
 
 	kDec, err := hex.DecodeString(k)
 	require.NoError(t, err)
@@ -73,34 +78,38 @@ func runTest(t *testing.T, cipherName string) {
 	h, err := convergent.NewHash(bytes.NewReader(clearContent))
 	require.NoError(t, err)
 
-	hs := hex.EncodeToString(h.Sum(nil))
+	t.Logf("hash=%s", h)
 
-	_, has := mapHash[hs]
+	_, has := mapHash[h]
 	require.False(t, has) // At this point the content is unkonwn
+
+	k, err := convergent.NewKey(h, cfgs...)
+	require.NoError(t, err)
+	require.NotNil(t, k)
 
 	// We will encrypt the stuff
 	dest := new(bytes.Buffer)
-	err = convergent.EncryptTo(bytes.NewReader(clearContent), dest, h, cfgs)
+	err = k.EncryptPipe(bytes.NewReader(clearContent), dest)
 	require.NoError(t, err)
 
 	// Calculate a new locator from the sha512
-	l, err := convergent.NewLocator(h, cfgs...)
+	l, err := k.Locator()
 	require.NoError(t, err)
 
 	// Store the encrypted content
 	mapEncryptedContent[l] = dest.Bytes()
-	mapHash[hs] = struct{}{}
+	mapHash[h] = struct{}{}
 
 	// Now simulated a new encryption from the same content, that should trigger deduplication
 	// We start by getting the hash
 	h, err = convergent.NewHash(bytes.NewReader(clearContent))
 	require.NoError(t, err)
 
-	_, has = mapHash[hs]
+	_, has = mapHash[h]
 	require.True(t, has) // This is the point of deduplication
 
-	// Since the hash is known we must be able to retrieve the encrypted content the the locator
-	l, err = convergent.NewLocator(h, cfgs...)
+	// Since the hash is known we must be able to retrieve the encrypted content from the locator
+	l, err = k.Locator()
 	require.NoError(t, err)
 	encryptedContent, has := mapEncryptedContent[l]
 	require.True(t, has)
@@ -108,9 +117,142 @@ func runTest(t *testing.T, cipherName string) {
 	// The deduplication has been proven.
 	// For fun, let's decrypt it
 	dest = new(bytes.Buffer)
-	err = convergent.DecryptTo(bytes.NewReader(encryptedContent), dest, h, cfgs)
+	err = k.DecryptPipe(bytes.NewReader(encryptedContent), dest)
 	require.NoError(t, err)
 
 	// Ensure the content is correctly decrypted
 	require.EqualValues(t, clearContent, dest.Bytes())
+}
+
+func TestSequentialEncryption(t *testing.T) {
+	var content = "this is a very sensitive content"
+
+	// The key will be Instantiate from the sha152 of the content
+	hash, err := convergent.NewHash(strings.NewReader(content))
+	require.NoError(t, err)
+
+	// Prepare a keyloadConfig to be able to Instantiate the key properly
+	cfg := convergent.ConvergentEncryptionConfig{
+		Cipher: aesgcm.CipherName,
+	}
+
+	// Instantiate a Sequence key from the sha512
+	ck, err := convergent.NewKey(hash, cfg)
+	require.NoError(t, err)
+	k, err := ck.NewSequenceKey()
+	require.NoError(t, err)
+	require.NotNil(t, k)
+
+	encryptedBuffer, err := k.Encrypt([]byte(content))
+	require.NoError(t, err)
+
+	// Due to the nonce, the same plain text with the same key won't be encrypted the same way
+	encryptedBuffer2, err := k.Encrypt([]byte(content))
+	require.NoError(t, err)
+	require.NotEqual(t, encryptedBuffer, encryptedBuffer2)
+
+	// But if we reinitialize the key, it will encrypt the plain text in a deterministic way
+	k, err = convergent.NewKey(hash, cfg)
+	require.NoError(t, err)
+	require.NotNil(t, k)
+	encryptedBuffer3, err := k.Encrypt([]byte(content))
+	require.NoError(t, err)
+	require.Equal(t, encryptedBuffer, encryptedBuffer3)
+
+	// Checks that all decrypted contents
+	decContent, err := k.Decrypt(encryptedBuffer)
+	require.NoError(t, err)
+	require.Equal(t, content, string(decContent))
+
+	decContent, err = k.Decrypt(encryptedBuffer2)
+	require.NoError(t, err)
+	require.Equal(t, content, string(decContent))
+
+	decContent, err = k.Decrypt(encryptedBuffer3)
+	require.NoError(t, err)
+	require.Equal(t, content, string(decContent))
+
+	t.Run("key reinitialization from config", func(t *testing.T) {
+		// Dump the key configuration to string
+		cfgBtes, err := json.Marshal(cfg)
+		require.NoError(t, err)
+		t.Logf("deterministic key config is : %s", string(cfgBtes))
+
+		var cfg2 convergent.ConvergentEncryptionConfig
+
+		t.Log(string(cfgBtes))
+
+		// Marshal it as a KeyConfig
+		err = json.Unmarshal(cfgBtes, &cfg2)
+		require.NoError(t, err)
+
+		// Reload the key from its configuration
+		k, err = convergent.NewKey(hash, cfg2)
+		require.NoError(t, err)
+		// check encrypt/decrypt
+		encryptedBufferBis, err := k.Encrypt([]byte(content))
+		require.NoError(t, err)
+		decContent, err = k.Decrypt(encryptedBufferBis)
+		require.NoError(t, err)
+		require.Equal(t, content, string(decContent))
+		// Check the deterministic nonce
+		require.Equal(t, encryptedBuffer, encryptedBufferBis)
+	})
+
+	t.Run("with multiple config", func(t *testing.T) {
+		cfg1 := convergent.ConvergentEncryptionConfig{
+			Cipher:    aesgcm.CipherName,
+			Timestamp: time.Now().Unix(),
+		}
+
+		k, err := convergent.NewKey(hash, cfg1)
+		require.NoError(t, err)
+
+		encryptedBuffer1, err := k.Encrypt([]byte(content))
+		require.NoError(t, err)
+
+		cfg1.Timestamp = time.Now().Add(-1 * time.Minute).Unix()
+		cfg2 := convergent.ConvergentEncryptionConfig{
+			Cipher:      aesgcm.CipherName,
+			Timestamp:   time.Now().Unix(),
+			SecretValue: "secret value",
+		}
+
+		k, err = convergent.NewKey(hash, cfg1, cfg2)
+		require.NoError(t, err)
+
+		encryptedBuffer2, err := k.Encrypt([]byte(content))
+		require.NoError(t, err)
+
+		// With the salt, the encyption should be equals to the encryption without salt
+		require.NotEqual(t, encryptedBuffer1, encryptedBuffer2)
+
+		k, err = convergent.NewKey(hash, cfg1, cfg2)
+		require.NoError(t, err)
+
+		decryptedContent, err := k.Decrypt(encryptedBuffer1)
+		require.NoError(t, err)
+
+		require.Equal(t, []byte(content), decryptedContent)
+	})
+}
+
+func ProviderTest() (configstore.ItemList, error) {
+	ret := configstore.ItemList{
+		Items: []configstore.Item{
+			configstore.NewItem(
+				convergent.EncryptionKeyConfigName,
+				`{"identifier":"test", "timestamp":1522325806,"cipher":"aes-gcm"}`,
+				1,
+			),
+		},
+	}
+	return ret, nil
+}
+
+func TestLoadKeyFromStore(t *testing.T) {
+	configstore.RegisterProvider("test", ProviderTest)
+	k, err := convergent.LoadKey("38cd3c98c2d50fae7e3aba2f346cea9a8ff2e382145fc373fa79424ee3b9cdaa2c19c67332d1ff2132c8c9296acb74615100af4cc32eb97084095a33e4cd854b", "test")
+	require.NoError(t, err)
+	require.NotNil(t, k)
 }

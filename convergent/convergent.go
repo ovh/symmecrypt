@@ -12,28 +12,244 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"hash"
 	"io"
 	"sort"
 
+	"github.com/ovh/configstore"
 	"github.com/ovh/symmecrypt"
 	"github.com/ovh/symmecrypt/stream"
 	"golang.org/x/crypto/pbkdf2"
 )
 
+type Key interface {
+	symmecrypt.Key
+	EncryptPipe(io.Reader, io.Writer, ...[]byte) error
+	DecryptPipe(io.Reader, io.Writer, ...[]byte) error
+	Locator() (string, error)
+	NewSequenceKey() (symmecrypt.Key, error)
+}
+
+type key struct {
+	Hash   string                       `json:"hash"`
+	Config []ConvergentEncryptionConfig `json:"encryption_config"`
+}
+
 type ConvergentEncryptionConfig struct {
 	Identifier  string `json:"identifier,omitempty"`
 	Timestamp   int64  `json:"timestamp,omitempty"`
 	Cipher      string `json:"cipher"`
-	LocatorSalt string `json:"localtor_salt"`
-	SecretValue string `json:"secret_value"`
+	LocatorSalt string `json:"localtor_salt,omitempty"`
+	SecretValue string `json:"secret_value,omitempty"`
 }
 
-func LoadKeyFromConfig() (symmecrypt.Key, error) {
-	return nil, nil
+const ChunkSize = 256 * 1024
+
+func (c key) EncryptPipe(r io.Reader, w io.Writer, extra ...[]byte) error {
+	k, err := c.NewSequenceKey()
+	if err != nil {
+		return err
+	}
+	wc := stream.NewWriter(w, k, ChunkSize, extra...)
+	if _, err := io.Copy(wc, r); err != nil {
+		return err
+	}
+	return wc.Close()
 }
 
-func NewKey(h hash.Hash, cfgs ...ConvergentEncryptionConfig) (symmecrypt.Key, error) {
+func (c key) DecryptPipe(r io.Reader, w io.Writer, extra ...[]byte) error {
+	k, err := c.NewSequenceKey()
+	if err != nil {
+		return err
+	}
+	rc := stream.NewReader(r, k, ChunkSize, extra...)
+	if _, err := io.Copy(w, rc); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c key) Locator() (string, error) {
+	l, err := locator(c.Hash, c.Config[0].LocatorSalt)
+	if err != nil {
+		return "", err
+	}
+	return l, nil
+}
+
+func (c key) Encrypt(s []byte, extra ...[]byte) ([]byte, error) {
+	k, err := c.NewSequenceKey()
+	if err != nil {
+		return nil, err
+	}
+	return k.Encrypt(s, extra...)
+}
+
+func (c key) Decrypt(s []byte, extra ...[]byte) ([]byte, error) {
+	k, err := c.NewSequenceKey()
+	if err != nil {
+		return nil, err
+	}
+	return k.Decrypt(s, extra...)
+}
+
+func (c key) EncryptMarshal(i interface{}, extra ...[]byte) (string, error) {
+	k, err := c.NewSequenceKey()
+	if err != nil {
+		return "", err
+	}
+	return k.EncryptMarshal(i, extra...)
+}
+
+func (c key) DecryptMarshal(s string, i interface{}, extra ...[]byte) error {
+	k, err := c.NewSequenceKey()
+	if err != nil {
+		return err
+	}
+	return k.DecryptMarshal(s, i, extra...)
+}
+
+func (c key) Wait() {
+	k, _ := c.NewSequenceKey()
+	if k != nil {
+		k.Wait()
+	}
+}
+
+func (c key) String() (string, error) {
+	k, err := c.NewSequenceKey()
+	if err != nil {
+		return "", err
+	}
+	return k.String()
+}
+
+func (c key) NewSequenceKey() (symmecrypt.Key, error) {
+	return newSequenceKey(c.Hash, c.Config...)
+}
+
+// NewKey returns a convergent.Key object configured from a hash and number of ConvergentEncryptionConfig objects.
+// If several ConvergentEncryptionConfig are supplied, the returned Key will be composite.
+// A composite key encrypts with the latest Key (based on timestamp) and decrypts with any of they keys.
+//
+// The key cipher name is expected to match a KeyFactory that got registered through RegisterCipher().
+// Either use a built-in cipher, or make sure to register a proper factory for this cipher.
+// This KeyFactory will be called, either directly or when the symmecrypt/seal global singleton gets unsealed, if applicable.
+func NewKey(hash string, cfgs ...ConvergentEncryptionConfig) (Key, error) {
+	hbtes, err := hex.DecodeString(hash)
+	if err != nil {
+		return nil, err
+	}
+	for i := range cfgs {
+		cfg := &cfgs[i]
+		factory, err := symmecrypt.GetKeyFactory(cfg.Cipher)
+		if err != nil {
+			return nil, fmt.Errorf("unable to get key factory: %w", err)
+		}
+		if factory.KeyLen() > len(hbtes) {
+			return nil, errors.New("invalid hash size")
+		}
+	}
+
+	sort.Slice(cfgs, func(i, j int) bool { return cfgs[i].Timestamp > cfgs[j].Timestamp })
+
+	return &key{
+		Hash:   hash,
+		Config: cfgs,
+	}, nil
+}
+
+func configFactory() interface{} {
+	return &ConvergentEncryptionConfig{}
+}
+
+// Helper to manipulate the configuration encryption keys by identifier
+func rekeyConfigByIdentifier(s *configstore.Item) string {
+	i, err := s.Unmarshaled()
+	if err == nil {
+		return i.(*ConvergentEncryptionConfig).Identifier
+	}
+	return ""
+}
+
+// Helper to sort the configuration encryption keys by timestamp
+func reorderTimestamp(s *configstore.Item) int64 {
+	i, err := s.Unmarshaled()
+	if err == nil {
+		ret := i.(*ConvergentEncryptionConfig).Timestamp
+		return ret
+	}
+	return s.Priority()
+}
+
+var (
+	EncryptionKeyConfigName = "convergent-encryption-key-config"
+	// ConfigFilter is the configstore manipulation filter used to retrieve the encryption keys
+	ConfigFilter = configstore.Filter().Slice(EncryptionKeyConfigName).Unmarshal(configFactory).Rekey(rekeyConfigByIdentifier).Reorder(reorderTimestamp)
+)
+
+// LoadKeyFromStore instantiates a new encryption key for a given identifier from a specific store instance.
+// It retrieves all the necessary data from configstore then calls NewKey().
+//
+// If several keys are found for the identifier, they are sorted by timestamp, and a composite key is returned.
+// The most recent key will be used for encryption, and decryption will be done by any of them.
+// There needs to be _only one_ key with the highest priority for the identifier.
+//
+// If the key configuration specifies it is sealed, the key returned will be wrapped by an unseal mechanism.
+// When the symmecrypt/seal global singleton gets unsealed, the key will become usable instantly. It will return errors in the meantime.
+//
+// The key cipher name is expected to match a KeyFactory that got registered through RegisterCipher().
+// Either use a built-in cipher, or make sure to register a proper factory for this cipher.
+// This KeyFactory will be called, either directly or when the symmecrypt/seal global singleton gets unsealed, if applicable.
+func LoadKeyFromStore(hash, identifier string, store *configstore.Store) (Key, error) {
+	items, err := ConfigFilter.Slice(identifier).Store(store).GetItemList()
+	if err != nil {
+		return nil, err
+	}
+
+	switch configstore.Filter().Squash().Apply(items).Len() {
+	case 0:
+		return nil, fmt.Errorf("encryption key '%s' not found", identifier)
+	case 1: // OK, single key with highest prio
+	default:
+		return nil, fmt.Errorf("ambiguous config: several encryption keys conflicting for '%s'", identifier)
+	}
+
+	var cfgs []ConvergentEncryptionConfig
+	for _, item := range items.Items {
+		i, err := item.Unmarshaled()
+		if err != nil {
+			return nil, err
+		}
+		cfg := i.(*ConvergentEncryptionConfig)
+		cfgs = append(cfgs, *cfg)
+	}
+
+	key, err := NewKey(hash, cfgs...)
+	if err != nil {
+		return nil, fmt.Errorf("encryption key '%s': %v", identifier, err)
+	}
+
+	return key, nil
+}
+
+// LoadKey instantiates a new encryption key for a given identifier from the default store in configstore.
+// It retrieves all the necessary data from configstore then calls NewKey().
+//
+// If several keys are found for the identifier, they are sorted by timestamp, and a composite key is returned.
+// The most recent key will be used for encryption, and decryption will be done by any of them.
+// There needs to be _only one_ key with the highest priority for the identifier.
+//
+// If the key configuration specifies it is sealed, the key returned will be wrapped by an unseal mechanism.
+// When the symmecrypt/seal global singleton gets unsealed, the key will become usable instantly. It will return errors in the meantime.
+//
+// The key cipher name is expected to match a KeyFactory that got registered through RegisterCipher().
+// Either use a built-in cipher, or make sure to register a proper factory for this cipher.
+// This KeyFactory will be called, either directly or when the symmecrypt/seal global singleton gets unsealed, if applicable.
+func LoadKey(hash, identifier string) (Key, error) {
+	return LoadKeyFromStore(hash, identifier, configstore.DefaultStore)
+}
+
+func newSequenceKey(h string, cfgs ...ConvergentEncryptionConfig) (symmecrypt.Key, error) {
 	if len(cfgs) == 0 {
 		return nil, errors.New("missing key config")
 	}
@@ -49,7 +265,10 @@ func NewKey(h hash.Hash, cfgs ...ConvergentEncryptionConfig) (symmecrypt.Key, er
 			return nil, fmt.Errorf("unable to get key factory: %w", err)
 		}
 
-		var key = KeyFromHash(h, cfg.SecretValue, factory.KeyLen())
+		key, err := KeyFromHash(h, cfg.SecretValue, factory.KeyLen())
+		if err != nil {
+			return nil, fmt.Errorf("unable to create new key: %w", err)
+		}
 
 		ref, err = factory.NewSequenceKey(key)
 		if err != nil {
@@ -67,76 +286,31 @@ func NewKey(h hash.Hash, cfgs ...ConvergentEncryptionConfig) (symmecrypt.Key, er
 }
 
 // NewHash reads the provided io.Reader and returns the sha512 hash
-func NewHash(r io.Reader) (hash.Hash, error) {
+func NewHash(r io.Reader) (string, error) {
 	hash := sha512.New()
 	if _, err := io.Copy(hash, r); err != nil {
-		return nil, err
+		return "", err
 	}
-	return hash, nil
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func KeyFromHash(h hash.Hash, secretValue string, keylen int) string {
-	k := h.Sum([]byte(secretValue))[:keylen]
-	return hex.EncodeToString(k)
+func KeyFromHash(s string, secretValue string, keylen int) (string, error) {
+	h := sha512.New()
+	sbtes, err := hex.DecodeString(s)
+	if err != nil {
+		return "", err
+	}
+	_, _ = h.Write(sbtes)
+	_, _ = h.Write([]byte(secretValue))
+	k := h.Sum(nil)[:keylen]
+	return hex.EncodeToString(k), nil
 }
 
 // Locator returns the result of PBKDF2. PBKDF2 is a key derivation function
 // https://en.wikipedia.org/wiki/PBKDF2
-func Locator(s string, salt string) (string, error) {
+func locator(s string, salt string) (string, error) {
 	if len(salt) < 8 {
 		return "", errors.New("at least 8 Bytes are recommanded for the salt")
 	}
 	return hex.EncodeToString(pbkdf2.Key([]byte(s), []byte(salt), 4096, 32, sha1.New)), nil
-}
-
-// MustLocator returns the result of PBKDF2. PBKDF2 is a key derivation function
-// If the salt doesnt respect the PBKDF2 RFC, it will panic
-func MustLocator(s string, salt string) string {
-	l, err := Locator(s, salt)
-	if err != nil {
-		panic(err)
-	}
-	return l
-}
-
-func NewLocator(h hash.Hash, cfgs ...ConvergentEncryptionConfig) (string, error) {
-	if len(cfgs) == 0 {
-		return "", errors.New("locator salt configuration must be provided")
-	}
-
-	// sort by timestamp: latest (bigger timestamp) first
-	sort.Slice(cfgs, func(i, j int) bool { return cfgs[i].Timestamp > cfgs[j].Timestamp })
-	sha512_256 := h.Sum(nil)
-	s := hex.EncodeToString(sha512_256)
-	l, err := Locator(s, cfgs[0].LocatorSalt)
-	if err != nil {
-		return "", err
-	}
-	return l, nil
-}
-
-const ChunkSize = 256 * 1024
-
-func EncryptTo(r io.Reader, w io.Writer, h hash.Hash, cfgs []ConvergentEncryptionConfig, extra ...[]byte) error {
-	k, err := NewKey(h, cfgs...)
-	if err != nil {
-		return err
-	}
-	wc := stream.NewWriter(w, k, ChunkSize, extra...)
-	if _, err := io.Copy(wc, r); err != nil {
-		return err
-	}
-	return wc.Close()
-}
-
-func DecryptTo(r io.Reader, w io.Writer, h hash.Hash, cfgs []ConvergentEncryptionConfig, extra ...[]byte) error {
-	k, err := NewKey(h, cfgs...)
-	if err != nil {
-		return err
-	}
-	rc := stream.NewReader(r, k, ChunkSize, extra...)
-	if _, err := io.Copy(w, rc); err != nil {
-		return err
-	}
-	return nil
 }

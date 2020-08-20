@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ovh/configstore"
 	toml "github.com/pelletier/go-toml"
@@ -18,8 +17,6 @@ import (
 	yaml "gopkg.in/yaml.v2"
 
 	"github.com/ovh/symmecrypt"
-	"github.com/ovh/symmecrypt/ciphers/aesgcm"
-	"github.com/ovh/symmecrypt/convergent"
 	"github.com/ovh/symmecrypt/keyloader"
 	"github.com/ovh/symmecrypt/stream"
 )
@@ -456,117 +453,6 @@ func ExampleNewReader() {
 	if err != nil {
 		panic(err)
 	}
-}
-
-func TestSequentialEncryption(t *testing.T) {
-	var content = "this is a very sensitive content"
-
-	// The key will be Instantiate from the sha152 of the content
-	hash, err := convergent.NewHash(strings.NewReader(content))
-	require.NoError(t, err)
-
-	// Prepare a keyloadConfig to be able to Instantiate the key properly
-	cfg := convergent.ConvergentEncryptionConfig{
-		Cipher: aesgcm.CipherName,
-	}
-
-	// Instantiate a Sequence key from the sha512
-	k, err := convergent.NewKey(hash, cfg)
-	require.NoError(t, err)
-	require.NotNil(t, k)
-
-	encryptedBuffer, err := k.Encrypt([]byte(content))
-	require.NoError(t, err)
-
-	// Due to the nonce, the same plain text with the same key won't be encrypted the same way
-	encryptedBuffer2, err := k.Encrypt([]byte(content))
-	require.NoError(t, err)
-	assert.NotEqual(t, encryptedBuffer, encryptedBuffer2)
-
-	// But if we reinitialize the key, it will encrypt the plain text in a deterministic way
-	k, err = convergent.NewKey(hash, cfg)
-	require.NoError(t, err)
-	require.NotNil(t, k)
-	encryptedBuffer3, err := k.Encrypt([]byte(content))
-	require.NoError(t, err)
-	require.Equal(t, encryptedBuffer, encryptedBuffer3)
-
-	// Checks that all decrypted contents
-	decContent, err := k.Decrypt(encryptedBuffer)
-	require.NoError(t, err)
-	require.Equal(t, content, string(decContent))
-
-	decContent, err = k.Decrypt(encryptedBuffer2)
-	require.NoError(t, err)
-	require.Equal(t, content, string(decContent))
-
-	decContent, err = k.Decrypt(encryptedBuffer3)
-	require.NoError(t, err)
-	require.Equal(t, content, string(decContent))
-
-	t.Run("key reinitialization from config", func(t *testing.T) {
-		// Dump the key configuration to string
-		cfgBtes, err := json.Marshal(cfg)
-		require.NoError(t, err)
-		t.Logf("deterministic key config is : %s", string(cfgBtes))
-
-		var cfg2 convergent.ConvergentEncryptionConfig
-
-		t.Log(string(cfgBtes))
-
-		// Marshal it as a KeyConfig
-		err = json.Unmarshal(cfgBtes, &cfg2)
-		require.NoError(t, err)
-
-		// Reload the key from its configuration
-		k, err = convergent.NewKey(hash, cfg2)
-		require.NoError(t, err)
-		// check encrypt/decrypt
-		encryptedBufferBis, err := k.Encrypt([]byte(content))
-		require.NoError(t, err)
-		decContent, err = k.Decrypt(encryptedBufferBis)
-		require.NoError(t, err)
-		assert.Equal(t, content, string(decContent))
-		// Check the deterministic nonce
-		assert.Equal(t, encryptedBuffer, encryptedBufferBis)
-	})
-
-	t.Run("with multiple config", func(t *testing.T) {
-		cfg1 := convergent.ConvergentEncryptionConfig{
-			Cipher:    aesgcm.CipherName,
-			Timestamp: time.Now().Unix(),
-		}
-
-		k, err := convergent.NewKey(hash, cfg1)
-		require.NoError(t, err)
-
-		encryptedBuffer1, err := k.Encrypt([]byte(content))
-		require.NoError(t, err)
-
-		cfg1.Timestamp = time.Now().Add(-1 * time.Minute).Unix()
-		cfg2 := convergent.ConvergentEncryptionConfig{
-			Cipher:      aesgcm.CipherName,
-			Timestamp:   time.Now().Unix(),
-			SecretValue: "secret value",
-		}
-
-		k, err = convergent.NewKey(hash, cfg1, cfg2)
-		require.NoError(t, err)
-
-		encryptedBuffer2, err := k.Encrypt([]byte(content))
-		require.NoError(t, err)
-
-		// With the salt, the encyption should be equals to the encryption without salt
-		assert.NotEqual(t, encryptedBuffer1, encryptedBuffer2)
-
-		k, err = convergent.NewKey(hash, cfg1, cfg2)
-		require.NoError(t, err)
-
-		decryptedContent, err := k.Decrypt(encryptedBuffer1)
-		require.NoError(t, err)
-
-		require.Equal(t, []byte(content), decryptedContent)
-	})
 }
 
 func TestWriteAndRead(t *testing.T) {
