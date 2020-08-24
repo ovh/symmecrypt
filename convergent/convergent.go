@@ -23,8 +23,7 @@ import (
 
 type Key interface {
 	symmecrypt.Key
-	EncryptPipe(io.Reader, io.Writer, ...[]byte) error
-	DecryptPipe(io.Reader, io.Writer, ...[]byte) error
+	stream.Key
 	Locator() (string, error)
 	NewSequenceKey() (symmecrypt.Key, error)
 }
@@ -42,18 +41,13 @@ type ConvergentEncryptionConfig struct {
 	SecretValue string `json:"secret_value,omitempty"`
 }
 
-const ChunkSize = 256 * 1024
-
 func (c key) EncryptPipe(r io.Reader, w io.Writer, extra ...[]byte) error {
 	k, err := c.NewSequenceKey()
 	if err != nil {
 		return err
 	}
-	wc := stream.NewWriter(w, k, ChunkSize, extra...)
-	if _, err := io.Copy(wc, r); err != nil {
-		return err
-	}
-	return wc.Close()
+	sk := stream.NewKey(k)
+	return sk.EncryptPipe(r, w, extra...)
 }
 
 func (c key) DecryptPipe(r io.Reader, w io.Writer, extra ...[]byte) error {
@@ -61,11 +55,8 @@ func (c key) DecryptPipe(r io.Reader, w io.Writer, extra ...[]byte) error {
 	if err != nil {
 		return err
 	}
-	rc := stream.NewReader(r, k, ChunkSize, extra...)
-	if _, err := io.Copy(w, rc); err != nil {
-		return err
-	}
-	return nil
+	sk := stream.NewKey(k)
+	return sk.DecryptPipe(r, w, extra...)
 }
 
 func (c key) Locator() (string, error) {

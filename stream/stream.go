@@ -9,6 +9,39 @@ import (
 	_ "github.com/ovh/symmecrypt/keyloader"
 )
 
+const ChunkSize = 256 * 1024
+
+type Key interface {
+	EncryptPipe(io.Reader, io.Writer, ...[]byte) error
+	DecryptPipe(io.Reader, io.Writer, ...[]byte) error
+}
+
+func NewKey(k symmecrypt.Key) Key {
+	return key{k}
+}
+
+type key struct {
+	symmecrypt.Key
+}
+
+var _ Key = new(key)
+
+func (k key) EncryptPipe(r io.Reader, w io.Writer, extra ...[]byte) error {
+	wc := NewWriter(w, k, ChunkSize, extra...)
+	if _, err := io.Copy(wc, r); err != nil {
+		return err
+	}
+	return wc.Close()
+}
+
+func (k key) DecryptPipe(r io.Reader, w io.Writer, extra ...[]byte) error {
+	rc := NewReader(r, k, ChunkSize, extra...)
+	if _, err := io.Copy(w, rc); err != nil {
+		return err
+	}
+	return nil
+}
+
 var _ io.WriteCloser = new(chunksWriter)
 
 type chunksWriter struct {
