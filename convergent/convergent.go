@@ -37,7 +37,7 @@ type ConvergentEncryptionConfig struct {
 	Identifier  string `json:"identifier,omitempty"`
 	Timestamp   int64  `json:"timestamp,omitempty"`
 	Cipher      string `json:"cipher"`
-	LocatorSalt string `json:"localtor_salt,omitempty"`
+	LocatorSalt string `json:"locator_salt,omitempty"`
 	SecretValue string `json:"secret_value,omitempty"`
 }
 
