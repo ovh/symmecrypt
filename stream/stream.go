@@ -104,7 +104,7 @@ func (w *chunksWriter) Write(p []byte) (int, error) {
 	if len(p) < x {
 		n, err := w.currentChunkWriter.Write(p)
 		w.currentChunkBytesWritten += int(n)
-		return n, err
+		return len(p), err
 	} else {
 		p1 := p[:x]
 		p2 := p[x:]
@@ -115,7 +115,10 @@ func (w *chunksWriter) Write(p []byte) (int, error) {
 		}
 
 		y, err := w.Write(p2)
-		return x + y, err
+		if err != nil {
+			return y, err
+		}
+		return len(p), nil
 	}
 }
 
