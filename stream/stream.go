@@ -53,22 +53,22 @@ type chunksWriter struct {
 	currentChunkBytesWritten int
 }
 
-func (w *chunksWriter) encryptCurrentChunk() (int, error) {
+func (w *chunksWriter) encryptCurrentChunk() error {
 	if w.currentChunkWriter == nil && w.currentChunkBytesWritten == 0 {
-		return 0, nil
+		return nil
 	}
 	currentChunk := w.currentChunkWriter.Bytes()
 	// first step: encrypt the chunks
 	btes, err := w.k.Encrypt(currentChunk, w.extras...)
 	if err != nil {
-		return len(currentChunk), err
+		return err
 	}
 
 	// then write into the destination writer the len of the encrypted chunks
 	headerBuf := make([]byte, binary.MaxVarintLen32)
 	binary.PutUvarint(headerBuf, uint64(len(btes)))
 	if _, err := w.destination.Write(headerBuf); err != nil {
-		return len(currentChunk), err
+		return err
 	}
 
 	// then write into the desitination writer the encrypted chunks
@@ -78,7 +78,7 @@ func (w *chunksWriter) encryptCurrentChunk() (int, error) {
 	w.currentChunkBytesWritten = 0
 	w.currentChunkWriter = nil
 
-	return len(currentChunk), err
+	return err
 }
 
 func (w *chunksWriter) Write(p []byte) (int, error) {
@@ -90,24 +90,29 @@ func (w *chunksWriter) Write(p []byte) (int, error) {
 		w.currentChunkBytesWritten = 0
 	}
 
-	if w.currentChunkBytesWritten == w.chunkSize { // probably remove
-		return w.encryptCurrentChunk()
+	if w.currentChunkBytesWritten == w.chunkSize {
+		if err := w.encryptCurrentChunk(); err != nil {
+			return 0, err
+		}
 	}
 
 	if w.currentChunkBytesWritten+len(p) == w.chunkSize {
 		n, err := w.currentChunkWriter.Write(p)
 		if err != nil {
-			return int(n), err
+			return n, err
 		}
 		w.currentChunkBytesWritten += int(n)
-		return w.encryptCurrentChunk()
+		if err := w.encryptCurrentChunk(); err != nil {
+			return n, err
+		}
+		return n, nil
 	}
 
 	x := w.chunkSize - w.currentChunkBytesWritten
 	if len(p) < x {
 		n, err := w.currentChunkWriter.Write(p)
 		w.currentChunkBytesWritten += int(n)
-		return len(p), err
+		return n, err
 	} else {
 		p1 := p[:x]
 		p2 := p[x:]
@@ -121,13 +126,12 @@ func (w *chunksWriter) Write(p []byte) (int, error) {
 		if err != nil {
 			return y, err
 		}
-		return len(p), nil
+		return x + y, nil
 	}
 }
 
 func (w *chunksWriter) Close() error {
-	_, err := w.encryptCurrentChunk()
-	if err != nil {
+	if err := w.encryptCurrentChunk(); err != nil {
 		return err
 	}
 	closer, is := w.destination.(io.Closer)
