@@ -82,6 +82,9 @@ func (w *chunksWriter) encryptCurrentChunk() (int, error) {
 }
 
 func (w *chunksWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return len(p), nil
+	}
 	if w.currentChunkWriter == nil {
 		w.currentChunkWriter = new(bytes.Buffer)
 		w.currentChunkBytesWritten = 0
