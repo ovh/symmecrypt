@@ -193,8 +193,12 @@ func (b *KeyAEAD) Encrypt(text []byte, extra ...[]byte) ([]byte, error) {
 
 	var nonce = make([]byte, ciph.NonceSize(), ciph.NonceSize()+ciph.Overhead()+len(text)) // Extra capacity to append ciphertext without realloc
 	if b.sequential {
+		counter := uint64(b.counter)
+		if cap(nonce) < binary.Size(counter) {
+			return nil, fmt.Errorf("invalid nonce size")
+		}
 		defer b.incrementCounter()
-		binary.PutUvarint(nonce, uint64(b.counter))
+		binary.PutUvarint(nonce, counter)
 	} else {
 		if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 			return nil, err

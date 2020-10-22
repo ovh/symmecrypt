@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/ovh/configstore"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ovh/symmecrypt/ciphers/aesgcm"
 	"github.com/ovh/symmecrypt/ciphers/aespmacsiv"
 	"github.com/ovh/symmecrypt/ciphers/chacha20poly1305"
@@ -17,7 +19,6 @@ import (
 	"github.com/ovh/symmecrypt/ciphers/xchacha20poly1305"
 	"github.com/ovh/symmecrypt/convergent"
 	"github.com/ovh/symmecrypt/symutils"
-	"github.com/stretchr/testify/require"
 )
 
 func TestKeyFromHash(t *testing.T) {

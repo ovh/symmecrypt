@@ -16,9 +16,10 @@ import (
 	"sort"
 
 	"github.com/ovh/configstore"
+	"golang.org/x/crypto/pbkdf2"
+
 	"github.com/ovh/symmecrypt"
 	"github.com/ovh/symmecrypt/stream"
-	"golang.org/x/crypto/pbkdf2"
 )
 
 type Key interface {
@@ -291,8 +292,16 @@ func KeyFromHash(s string, secretValue string, keylen int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	_, _ = h.Write(sbtes)
-	_, _ = h.Write([]byte(secretValue))
+	_, err = h.Write(sbtes)
+	if err != nil {
+		// hash.Write implementation never returns error
+		return "", err
+	}
+	_, err = h.Write([]byte(secretValue))
+	if err != nil {
+		// hash.Write implementation never returns error
+		return "", err
+	}
 	k := h.Sum(nil)[:keylen]
 	return hex.EncodeToString(k), nil
 }
