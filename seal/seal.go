@@ -47,7 +47,7 @@ type Seal struct {
 // SealError is the concrete type returned for all errors originating from seal mis-use:
 // Wrong parameters, incoherent state, etc.
 type SealError struct {
-    error
+	error
 }
 
 type internalKey struct {

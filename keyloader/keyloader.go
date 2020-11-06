@@ -41,6 +41,9 @@ const (
 var (
 	// ConfigFilter is the configstore manipulation filter used to retrieve the encryption keys
 	ConfigFilter = configstore.Filter().Slice(EncryptionKeyConfigName).Unmarshal(configFactory).Rekey(rekeyConfigByIdentifier).Reorder(reorderTimestamp)
+
+	// ErrKeySealed is returned when attempting to use a key that is still in a sealed state
+	ErrKeySealed = errors.New("encryption key is sealed!")
 )
 
 // KeyConfig is the representation of an encryption key in the configuration.
@@ -499,7 +502,7 @@ func newSealedKey(cfg *KeyConfig, factory symmecrypt.KeyFactory) symmecrypt.Key 
 
 func (s *sealedKey) Key() (symmecrypt.Key, error) {
 	if atomic.LoadUint32(&s.decrypted) == 0 {
-		return nil, errors.New("encryption key is sealed")
+		return nil, ErrKeySealed
 	}
 	return s.decryptedKey, nil
 }
