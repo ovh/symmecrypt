@@ -44,6 +44,12 @@ type Seal struct {
 	unsealedCh    chan struct{}
 }
 
+// SealError is the concrete type returned for all errors originating from seal mis-use:
+// Wrong parameters, incoherent state, etc.
+type SealError struct {
+    error
+}
+
 type internalKey struct {
 	Nonce string `json:"nonce"`
 	Key   string `json:"key"`
@@ -207,18 +213,18 @@ func WaitUnseal() bool {
 func (r *Seal) AddShard(s string) (bool, error) {
 
 	if r == nil {
-		return false, errors.New("no shamir root!")
+		return false, SealError{errors.New("no shamir root!")}
 	}
 
 	r.mut.Lock()
 	defer r.mut.Unlock()
 
 	if r.encryptionKey != nil {
-		return false, errors.New("already unsealed!")
+		return false, SealError{errors.New("already unsealed!")}
 	}
 
 	if !sssa.IsValidShare(s) {
-		return false, errors.New("invalid shard")
+		return false, SealError{errors.New("invalid shard")}
 	}
 
 	r.shards[s] = struct{}{}
@@ -237,23 +243,23 @@ func (r *Seal) AddShard(s string) (bool, error) {
 
 	plain, err := combine(shards)
 	if err != nil {
-		return r.reset(errors.New("bad shamir shards: invalid decoded payload"))
+		return r.reset(SealError{errors.New("bad shamir shards: invalid decoded payload")})
 	}
 
 	ik := &internalKey{}
 
 	err = json.Unmarshal([]byte(plain), ik)
 	if err != nil {
-		return r.reset(errors.New("bad shamir shards: invalid decoded payload"))
+		return r.reset(SealError{errors.New("bad shamir shards: invalid decoded payload")})
 	}
 
 	if ik.Nonce != r.Nonce {
-		return r.reset(errors.New("old shamir shards: nonce is outdated"))
+		return r.reset(SealError{errors.New("old shamir shards: nonce is outdated")})
 	}
 
 	k, err := symmecrypt.NewKey(encryptionCipher, ik.Key)
 	if err != nil {
-		return r.reset(fmt.Errorf("embedded encryption key is invalid: %v", err))
+		return r.reset(SealError{fmt.Errorf("embedded encryption key is invalid: %v", err)})
 	}
 
 	if r.unsealedCh != nil {
@@ -274,14 +280,14 @@ func combine(shards []string) (string, error) {
 func (r *Seal) Encrypt(b []byte, extra ...[]byte) (string, error) {
 
 	if r == nil {
-		return "", errors.New("seal is not initialized")
+		return "", SealError{errors.New("seal is not initialized")}
 	}
 
 	r.mut.Lock()
 	defer r.mut.Unlock()
 
 	if r.encryptionKey == nil {
-		return "", errors.New("seal is still sealed!")
+		return "", SealError{errors.New("seal is still sealed!")}
 	}
 
 	bEnc, err := r.encryptionKey.Encrypt(b, extra...)
@@ -295,14 +301,14 @@ func (r *Seal) Encrypt(b []byte, extra ...[]byte) (string, error) {
 func (r *Seal) Decrypt(s string, extra ...[]byte) ([]byte, error) {
 
 	if r == nil {
-		return nil, errors.New("seal is not initialized")
+		return nil, SealError{errors.New("seal is not initialized")}
 	}
 
 	r.mut.Lock()
 	defer r.mut.Unlock()
 
 	if r.encryptionKey == nil {
-		return nil, errors.New("seal is still sealed!")
+		return nil, SealError{errors.New("seal is still sealed!")}
 	}
 
 	bEnc, err := hex.DecodeString(s)
