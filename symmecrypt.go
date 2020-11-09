@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 )
+
+var LogErrorFunc = log.Println
 
 // Key is an abstraction of a symmetric encryption key
 // - Encrypt / Decrypt provide low-level data encryption, with extra data for MAC
@@ -25,6 +28,9 @@ type Key interface {
 type KeyFactory interface {
 	NewKey(string) (Key, error)
 	NewRandomKey() (Key, error)
+	NewSequenceKey(string) (Key, error)
+	NewRandomSequenceKey() (Key, error)
+	KeyLen() int
 }
 
 // CompositeKey provides a keyring mechanism: encrypt with first, decrypt with _any_
@@ -38,7 +44,6 @@ type ErrorKey struct {
 /*
 ** KEY TYPES (factory)
  */
-
 var (
 	factories    = map[string]KeyFactory{}
 	factoriesMut sync.Mutex
@@ -63,7 +68,7 @@ func RegisterCipher(name string, f KeyFactory) {
 func NewKey(cipher string, key string) (Key, error) {
 	f, err := GetKeyFactory(cipher)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to get key factory from cipher '%s': %w", cipher, err)
 	}
 	return f.NewKey(key)
 }
@@ -103,11 +108,25 @@ func (c CompositeKey) Encrypt(text []byte, extra ...[]byte) ([]byte, error) {
 	return c[0].Encrypt(text, extra...)
 }
 
+// DecryptUncap decrypts abitrary data with _any_ key, and returns the key that was used.
+// Useful for batch processes which may want to repeat decrypt operations using the same key without
+// going through the key ring logic each time.
+func (c CompositeKey) DecryptUncap(text []byte, extra ...[]byte) (Key, []byte, error) {
+	for _, k := range c {
+		b, err := k.Decrypt(text, extra...)
+		if err == nil {
+			return k, b, nil
+		}
+	}
+	return nil, nil, errors.New("failed to decrypt with all keys")
+}
+
 // Decrypt arbitrary data with _any_ key
 func (c CompositeKey) Decrypt(text []byte, extra ...[]byte) ([]byte, error) {
 	for _, k := range c {
 		b, err := k.Decrypt(text, extra...)
 		if err == nil {
+
 			return b, nil
 		}
 	}
@@ -193,7 +212,7 @@ type writer struct {
 	extras        [][]byte
 }
 
-// NewWriter instanciates an io.WriteCloser to help you encrypt while you write in a standard io.Writer.
+// NewWriter instantiates an io.WriteCloser to help you encrypt while you write in a standard io.Writer.
 // Internally it stores in an internal buffer the content you want to encrypt. This internal is flushed, encrypted
 // and write to the targeted io.Writer on Close().
 func NewWriter(w io.Writer, k Key, extra ...[]byte) io.WriteCloser {
@@ -240,10 +259,6 @@ func (sw *writer) Write(b []byte) (int, error) {
 	return sw.currentSecret.Write(b)
 }
 
-type reader struct {
-	*bytes.Buffer
-}
-
 // NewReader returns a new Reader which is able to decrypt the source io.Reader.
 // It returns an error if the source io.Reader is unreadable with the provided Key and extras.
 func NewReader(r io.Reader, k Key, extra ...[]byte) (io.Reader, error) {
@@ -253,15 +268,11 @@ func NewReader(r io.Reader, k Key, extra ...[]byte) (io.Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	// Decrypt all the buffer
-	decData, err := k.Decrypt(buffer.Bytes(), extra...)
+	btes := buffer.Bytes()
+	decData, err := k.Decrypt(btes, extra...)
 	if err != nil {
 		return nil, err
 	}
-
-	// Instanciate a bytes reader
-	reader := &reader{bytes.NewBuffer(decData)}
-
-	return reader, nil
+	return bytes.NewReader(decData), nil
 }

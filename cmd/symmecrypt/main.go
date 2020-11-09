@@ -73,7 +73,7 @@ func readKey() error {
 	for _, encodedKey := range keys {
 		plain, err := base64.StdEncoding.DecodeString(encodedKey)
 		if err != nil {
-			return fmt.Errorf("Invalid base64 encryption key: %s", err)
+			return fmt.Errorf("Invalid base64 encryption key: %w", err)
 		}
 		keyList = append(keyList, configstore.NewItem("encryption-key", string(plain), 1))
 	}
@@ -96,11 +96,11 @@ func main() {
 		}
 		key, err := keyloader.GenerateKey(*newEncryptionCipher, *keyIdentifier, false, time.Now())
 		if err != nil {
-			log.Fatalf("error: unable to generate key: %s", err)
+			log.Fatalf("error: unable to generate key: %v", err)
 		}
 		j, err := json.Marshal(key)
 		if err != nil {
-			log.Fatalf("error: unable to generate key: %s", err)
+			log.Fatalf("error: unable to generate key: %v", err)
 		}
 		newKey := string(j)
 		if *useBase64 {
@@ -120,7 +120,7 @@ func main() {
 			k, err = keyloader.LoadSingleKey()
 		}
 		if err != nil {
-			log.Fatalf("error: failed to instantiate key: %s", err)
+			log.Fatalf("error: failed to instantiate key: %v", err)
 		}
 		dataStr := readSecret()
 		extra := [][]byte{}
@@ -129,7 +129,7 @@ func main() {
 		}
 		b, err := k.Encrypt([]byte(dataStr), extra...)
 		if err != nil {
-			log.Fatalf("error: failed to encrypt: %s", err)
+			log.Fatalf("error: failed to encrypt: %v", err)
 		}
 		outputStr := string(b)
 		if *useBase64 {
@@ -149,13 +149,13 @@ func main() {
 			k, err = keyloader.LoadSingleKey()
 		}
 		if err != nil {
-			log.Fatalf("error: failed to instantiate key: %s", err)
+			log.Fatalf("error: failed to instantiate key: %v", err)
 		}
 		dataStr := readSecret()
 		if *useBase64 {
 			dataRaw, err := base64.StdEncoding.DecodeString(dataStr)
 			if err != nil {
-				log.Fatalf("error: failed to decode base64: %s", err)
+				log.Fatalf("error: failed to decode base64: %v", err)
 			}
 			dataStr = string(dataRaw)
 		}
@@ -165,7 +165,7 @@ func main() {
 		}
 		b, err := k.Decrypt([]byte(dataStr), extra...)
 		if err != nil {
-			log.Fatalf("error: failed to decrypt: %s", err)
+			log.Fatalf("error: failed to decrypt: %v", err)
 		}
 		fmt.Print(string(b))
 	}
@@ -177,7 +177,7 @@ func readSecret() string {
 		os.Exit(0)
 	}
 	if err != nil {
-		log.Fatalf("error: failed to read input: %s", err)
+		log.Fatalf("error: failed to read input: %v", err)
 	}
 	return string(b)
 }

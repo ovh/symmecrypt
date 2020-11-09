@@ -7,14 +7,18 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
-	"github.com/pelletier/go-toml"
+	"github.com/ovh/configstore"
+	toml "github.com/pelletier/go-toml"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	yaml "gopkg.in/yaml.v2"
 
-	"github.com/ovh/configstore"
 	"github.com/ovh/symmecrypt"
 	"github.com/ovh/symmecrypt/keyloader"
+	"github.com/ovh/symmecrypt/stream"
 )
 
 func ProviderTest() (configstore.ItemList, error) {
@@ -360,7 +364,7 @@ func TestWriterWithEncoders(t *testing.T) {
 	// Run the testcases
 	for _, tt := range testcases {
 		var writeBuf bytes.Buffer
-		// Instanciate a writer and an encoder
+		// Instantiate a writer and an encoder
 		w := symmecrypt.NewWriter(&writeBuf, tt.k, tt.extras...)
 		enc := tt.encoder(w)
 		// Encode
@@ -371,7 +375,7 @@ func TestWriterWithEncoders(t *testing.T) {
 		if err := w.Close(); err != nil {
 			t.Fatal(err)
 		}
-		// Instanciate a reader and an decoder
+		// Instantiate a reader and an decoder
 		r, err := symmecrypt.NewReader(&writeBuf, k, tt.extras...)
 		if err != nil {
 			t.Fatal(err)
@@ -448,5 +452,105 @@ func ExampleNewReader() {
 	_, err = io.Copy(os.Stdout, reader)
 	if err != nil {
 		panic(err)
+	}
+}
+
+func TestWriteAndRead(t *testing.T) {
+	var content = "this is a very sensitive content"
+
+	k, err := keyloader.LoadKey("test")
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	w := symmecrypt.NewWriter(&buf, k)
+	_, err = io.Copy(w, strings.NewReader(content))
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	r, err := symmecrypt.NewReader(bytes.NewReader(buf.Bytes()), k)
+	require.NoError(t, err)
+
+	var out bytes.Buffer
+	_, err = io.Copy(&out, r)
+	require.NoError(t, err)
+
+	assert.Equal(t, content, out.String())
+}
+
+func TestChunksWriterAndChunksReader(t *testing.T) {
+	var chunckSize = 11
+	var content = "this is a very sensitive content"
+
+	k, err := keyloader.LoadKey("test")
+	require.NoError(t, err)
+
+	var encryptedWriter bytes.Buffer
+	cw := stream.NewWriter(&encryptedWriter, k, chunckSize)
+
+	n, err := io.Copy(cw, strings.NewReader(content))
+	require.NoError(t, err)
+
+	err = cw.Close()
+	require.NoError(t, err)
+
+	encryptedContent := encryptedWriter.Bytes()
+	t.Logf("%d bytes encrypted: %x", n, encryptedContent)
+
+	decryptedOutput := bytes.Buffer{}
+	cr := stream.NewReader(bytes.NewReader(encryptedContent), k, chunckSize)
+
+	n, err = io.Copy(&decryptedOutput, cr)
+	require.NoError(t, err)
+	result := decryptedOutput.String()
+	t.Logf("%d bytes decrypted: %s", n, result)
+
+	assert.Equal(t, content, result)
+}
+
+func BenchmarkChunksWriter(b *testing.B) {
+	var chunckSize = 10
+	var content = "this is a very sensitive content"
+
+	for n := 0; n < b.N; n++ {
+		k, err := keyloader.LoadKey("test")
+		require.NoError(b, err)
+
+		var encryptedWriter bytes.Buffer
+		cw := stream.NewWriter(&encryptedWriter, k, chunckSize)
+
+		_, err = io.Copy(cw, strings.NewReader(content))
+		require.NoError(b, err)
+
+		err = cw.Close()
+		require.NoError(b, err)
+	}
+}
+
+func BenchmarkChunksReader(b *testing.B) {
+	var chunckSize = 10
+	var content = "this is a very sensitive content"
+
+	k, err := keyloader.LoadKey("test")
+	require.NoError(b, err)
+
+	var encryptedWriter bytes.Buffer
+	cw := stream.NewWriter(&encryptedWriter, k, chunckSize)
+
+	n, err := io.Copy(cw, strings.NewReader(content))
+	require.NoError(b, err)
+
+	err = cw.Close()
+	require.NoError(b, err)
+
+	encryptedContent := encryptedWriter.Bytes()
+	b.Logf("%d bytes encrypted: %x", n, encryptedContent)
+
+	for n := 0; n < b.N; n++ {
+		decryptedOutput := bytes.Buffer{}
+		cr := stream.NewReader(bytes.NewReader(encryptedContent), k, chunckSize)
+		_, err := io.Copy(&decryptedOutput, cr)
+		require.NoError(b, err)
+		result := decryptedOutput.String()
+		assert.Equal(b, content, result)
 	}
 }

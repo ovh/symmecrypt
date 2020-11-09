@@ -34,6 +34,10 @@ func init() {
 
 type hmacFactory struct{}
 
+func (f hmacFactory) KeyLen() int {
+	return KeyLen
+}
+
 func (f hmacFactory) NewKey(s string) (symmecrypt.Key, error) {
 	k, err := symutils.RawKey([]byte(s), KeyLen)
 	if err != nil {
@@ -48,6 +52,16 @@ func (f hmacFactory) NewRandomKey() (symmecrypt.Key, error) {
 		return nil, err
 	}
 	return Key(b), nil
+}
+
+func (f hmacFactory) NewSequenceKey(s string) (symmecrypt.Key, error) {
+	// the hmac cipher doesnt use a nonce, so a sequence key == a regular key
+	return f.NewKey(s)
+}
+
+func (f hmacFactory) NewRandomSequenceKey() (symmecrypt.Key, error) {
+	// the hmac cipher doesnt use a nonce, so a sequence key == a regular key
+	return f.NewRandomKey()
 }
 
 // Key is a simple key which uses plain data + HMAC-sha512 for authentication
