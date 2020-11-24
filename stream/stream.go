@@ -177,22 +177,22 @@ func NewReader(r io.Reader, k symmecrypt.Key, chunkSize int, extras ...[]byte) i
 
 func (r *chunksReader) readNewChunk() error {
 	// read the chunksize
-	headerBtes := make([]byte, binary.MaxVarintLen32)
-	if _, err := r.src.Read(headerBtes); err != nil { // READING THE CLEAR HEADER FROM THE ENCRYPTED SOURCE
+	headerBtes := &bytes.Buffer{}
+	if _, err := io.CopyN(headerBtes, r.src, binary.MaxVarintLen32); err != nil {
 		return err
 	}
 
-	n, err := binary.ReadUvarint(bytes.NewReader(headerBtes)) // READ THE HEADER BUFFER
+	n, err := binary.ReadUvarint(bytes.NewReader(headerBtes.Bytes())) // READ THE HEADER BUFFER
 	if err != nil {
 		return err
 	}
 
 	// read the chunk content
-	btes := make([]byte, n)
-	_, err = r.src.Read(btes)
-	if err != nil && err != io.EOF {
+	btsBuff := &bytes.Buffer{}
+	if _, err := io.CopyN(btsBuff, r.src, int64(n)); err != nil && err != io.EOF{
 		return err
 	}
+	btes := btsBuff.Bytes()
 
 	var clearContent []byte
 
