@@ -293,7 +293,7 @@ func TestDecryptFromHTTP(t *testing.T) {
 	// Serve the encrypted content
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(1 * time.Second)
-		io.WriteString(w, encryptedContent)
+		io.WriteString(w, encryptedContent) //nolint
 	}))
 	defer ts.Close()
 
