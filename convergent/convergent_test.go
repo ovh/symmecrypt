@@ -5,11 +5,16 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/ovh/configstore"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ovh/symmecrypt/ciphers/aesgcm"
@@ -256,4 +261,60 @@ func TestLoadKeyFromStore(t *testing.T) {
 	k, err := convergent.LoadKey("38cd3c98c2d50fae7e3aba2f346cea9a8ff2e382145fc373fa79424ee3b9cdaa2c19c67332d1ff2132c8c9296acb74615100af4cc32eb97084095a33e4cd854b", "test")
 	require.NoError(t, err)
 	require.NotNil(t, k)
+}
+
+func TestDecryptFromHTTP(t *testing.T) {
+	// Key config
+	cfgs := []convergent.ConvergentEncryptionConfig{
+		{
+			Cipher:      aesgcm.CipherName,
+			LocatorSalt: symutils.RandomSalt(),
+			SecretValue: symutils.MustRandomString(10),
+		},
+	}
+
+	// Encrypt a random content
+	clearContent := make([]byte, 10*1024)
+	rand.Read(clearContent) // nolint
+
+	h, err := convergent.NewHash(bytes.NewReader(clearContent))
+	require.NoError(t, err)
+
+	k, err := convergent.NewKey(h, cfgs...)
+	require.NoError(t, err)
+	require.NotNil(t, k)
+
+	dest := new(bytes.Buffer)
+	err = k.EncryptPipe(bytes.NewReader(clearContent), dest)
+	require.NoError(t, err)
+	encryptedContent := dest.String()
+
+	// Serve the encrypted content
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(1 * time.Second)
+		io.WriteString(w, encryptedContent) //nolint
+	}))
+	defer ts.Close()
+
+	wg := &sync.WaitGroup{}
+
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			res, err := http.Get(ts.URL)
+			require.NoError(t, err)
+
+			defer res.Body.Close()
+
+			dest := new(bytes.Buffer)
+			err = k.DecryptPipe(res.Body, dest)
+			require.NoError(t, err)
+
+			// Ensure the content is correctly decrypted
+			assert.EqualValues(t, clearContent, dest.Bytes())
+			wg.Done()
+		}()
+	}
+
+	wg.Wait()
 }
