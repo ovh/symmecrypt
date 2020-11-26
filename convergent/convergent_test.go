@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -305,12 +304,10 @@ func TestDecryptFromHTTP(t *testing.T) {
 			res, err := http.Get(ts.URL)
 			require.NoError(t, err)
 
-			body, err := ioutil.ReadAll(res.Body)
-			require.NoError(t, err)
-			res.Body.Close()
+			defer res.Body.Close()
 
 			dest := new(bytes.Buffer)
-			err = k.DecryptPipe(bytes.NewReader(body), dest)
+			err = k.DecryptPipe(res.Body, dest)
 			require.NoError(t, err)
 
 			// Ensure the content is correctly decrypted
