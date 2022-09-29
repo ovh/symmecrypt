@@ -29,7 +29,7 @@ import (
 func TestKeyFromHash(t *testing.T) {
 	// Create a new content that we want to encrypt
 	clearContent := make([]byte, 10*1024*1024)
-	rand.Read(clearContent) // nolint
+	rand.Read(clearContent)
 
 	// Get the hash to know if the content is already known and encrypted
 	h, err := convergent.NewHash(bytes.NewReader(clearContent))
@@ -78,7 +78,7 @@ func runTest(t *testing.T, cipherName string) {
 
 	// Create a new content that we want to encrypt
 	clearContent := make([]byte, 10*1024*1024)
-	rand.Read(clearContent) // nolint
+	rand.Read(clearContent)
 
 	// Get the hash to know if the content is already known and encrypted
 	h, err := convergent.NewHash(bytes.NewReader(clearContent))
@@ -87,7 +87,7 @@ func runTest(t *testing.T, cipherName string) {
 	t.Logf("hash=%s", h)
 
 	_, has := mapHash[h]
-	require.False(t, has) // At this point the content is unkonwn
+	require.False(t, has) // At this point the content is unknown
 
 	k, err := convergent.NewKey(h, cfgs...)
 	require.NoError(t, err)
@@ -275,7 +275,7 @@ func TestDecryptFromHTTP(t *testing.T) {
 
 	// Encrypt a random content
 	clearContent := make([]byte, 10*1024)
-	rand.Read(clearContent) // nolint
+	rand.Read(clearContent)
 
 	h, err := convergent.NewHash(bytes.NewReader(clearContent))
 	require.NoError(t, err)
@@ -292,7 +292,7 @@ func TestDecryptFromHTTP(t *testing.T) {
 	// Serve the encrypted content
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(1 * time.Second)
-		io.WriteString(w, encryptedContent) //nolint
+		io.WriteString(w, encryptedContent)
 	}))
 	defer ts.Close()
 

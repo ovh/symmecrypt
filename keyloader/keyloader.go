@@ -47,11 +47,11 @@ var (
 )
 
 // KeyConfig is the representation of an encryption key in the configuration.
-// - Identifier is a free name to uniquely reference this key (and its revisions). It is used when loading the key.
-// - Cipher controls which cipher is used (aes-gcm, ...)
-// - Timestamp dictates priority between encryption keys, and is useful to identify new versions of a key
-// - Sealed controls whether the key should be used as-is, or decrypted using symmecrypt/seal
-//   See RegisterCipher() to register a factory. The cipher field should be the same as the factory name.
+//   - Identifier is a free name to uniquely reference this key (and its revisions). It is used when loading the key.
+//   - Cipher controls which cipher is used (aes-gcm, ...)
+//   - Timestamp dictates priority between encryption keys, and is useful to identify new versions of a key
+//   - Sealed controls whether the key should be used as-is, or decrypted using symmecrypt/seal
+//     See RegisterCipher() to register a factory. The cipher field should be the same as the factory name.
 type KeyConfig struct {
 	Identifier string `json:"identifier,omitempty"`
 	Cipher     string `json:"cipher"`
