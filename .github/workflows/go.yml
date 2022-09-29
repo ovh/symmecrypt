@@ -1,0 +1,37 @@
+name: Go
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+    name: Go Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+    - name: Set up Go 1.x
+      uses: actions/setup-go@v2
+      with:
+        go-version: '>= 1.19.1'
+      id: go
+
+    - name: Check out code into the Go module directory
+      uses: actions/checkout@v2
+
+    - name: Setup
+      run: |
+        curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.49.0
+
+    - name: Test
+      run: |
+        golangci-lint run       # run a bunch of code checkers/linters in parallel
+        go test -v -race ./...  # Run all the tests with the race detector enabled
+
+    - name: Upload Code Coverage
+      if: runner.os == 'Linux'
+      run: bash <(curl -s https://codecov.io/bash)
