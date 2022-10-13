@@ -329,6 +329,6 @@ func (k *KeyMutex) String() (string, error) {
 
 func RandomSalt() string {
 	var buff = make([]byte, 8)
-	rand.Read(buff) // nolint
+	rand.Read(buff)
 	return string(buff)
 }

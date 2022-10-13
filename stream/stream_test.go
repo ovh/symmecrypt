@@ -45,7 +45,7 @@ func TestMain(m *testing.M) {
 
 func TestIncompleteRead(t *testing.T) {
 	clearContent := make([]byte, 32*1024+10)
-	rand.Read(clearContent) // nolint
+	rand.Read(clearContent)
 
 	k, err := keyloader.LoadKey("test")
 	require.NoError(t, err)

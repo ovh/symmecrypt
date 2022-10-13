@@ -7,7 +7,7 @@
 package convergent
 
 import (
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec
 	"crypto/sha512"
 	"encoding/hex"
 	"errors"
