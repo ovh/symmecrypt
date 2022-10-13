@@ -1,4 +1,4 @@
-name: Go
+name: CI
 
 on:
   push:
@@ -17,20 +17,19 @@ jobs:
     - name: Set up Go 1.x
       uses: actions/setup-go@v2
       with:
-        go-version: '>= 1.19.1'
+        go-version: '>= 1.19.2'
       id: go
 
     - name: Check out code into the Go module directory
       uses: actions/checkout@v2
 
-    - name: Setup
-      run: |
-        curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.49.0
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@v3
+      with:
+        version: latest
 
     - name: Test
-      run: |
-        golangci-lint run       # run a bunch of code checkers/linters in parallel
-        go test -v -race ./...  # Run all the tests with the race detector enabled
+      run: go test -v -race ./...
 
     - name: Upload Code Coverage
       if: runner.os == 'Linux'
