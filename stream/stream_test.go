@@ -70,5 +70,27 @@ func TestIncompleteRead(t *testing.T) {
 	assert.Contains(t, err.Error(), "EOF")
 
 	require.Equal(t, 32*1024+10, nbBytesReaden1+nbBytesReaden2)
+}
 
+func BenchmarkStream(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		clearContent := make([]byte, 32*1024+10)
+		rand.Read(clearContent) // nolint
+
+		k, _ := keyloader.LoadKey("test")
+
+		var bufWriter bytes.Buffer
+		streamWriter := stream.NewWriter(&bufWriter, k, 32*1024)
+		_, err := io.Copy(streamWriter, bytes.NewReader(clearContent))
+		require.NoError(b, err)
+
+		streamReader := stream.NewReader(strings.NewReader(bufWriter.String()), k, 32*1024)
+		var firstPart = make([]byte, 32*1024)
+		_, err = streamReader.Read(firstPart)
+		require.NoError(b, err)
+
+		var secondPart = make([]byte, 32*1024)
+		_, err = streamReader.Read(secondPart)
+		require.NoError(b, err)
+	}
 }
