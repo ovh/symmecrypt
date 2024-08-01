@@ -1,3 +1,2 @@
-Test*
-vendor/
-cmd/symmecrypt/symmecrypt
+dist/
+cover.out
