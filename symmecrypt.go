@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-var LogErrorFunc = log.Println
+var LogErrorFunc = log.Printf
 
 // Key is an abstraction of a symmetric encryption key
 // - Encrypt / Decrypt provide low-level data encryption, with extra data for MAC
