@@ -23,9 +23,6 @@ import (
 	// xchacha20-poly1305 cipher
 	"github.com/ovh/symmecrypt/ciphers/xchacha20poly1305"
 
-	// aes-pmac-siv cipher
-	_ "github.com/ovh/symmecrypt/ciphers/aespmacsiv"
-
 	// hmac cipher
 	_ "github.com/ovh/symmecrypt/ciphers/hmac"
 )

@@ -31,7 +31,7 @@ func ProviderTest() (configstore.ItemList, error) {
 			),
 			configstore.NewItem(
 				keyloader.EncryptionKeyConfigName,
-				`{"key":"7db2b4b695e11563edca94b0f9c7ad16919fc11eac414c1b1706cbaa3c3e61a4b884301ae4e8fbedcc4f000b9c52904f13ea9456379d373524dea7fef79b39f7","identifier":"test-composite","sealed":false,"timestamp":1522325758,"cipher":"aes-pmac-siv"}`,
+				`{"key":"7db2b4b695e11563edca94b0f9c7ad16919fc11eac414c1b1706cbaa3c3e61a4","identifier":"test-composite","sealed":false,"timestamp":1522325758,"cipher":"aes-gcm"}`,
 				1,
 			),
 			configstore.NewItem(

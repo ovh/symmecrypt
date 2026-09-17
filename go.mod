@@ -4,7 +4,6 @@ go 1.19
 
 require (
 	github.com/SSSaaS/sssa-golang v0.0.0-20170502204618-d37d7782d752
-	github.com/miscreant/miscreant.go v0.0.0-20200214223636-26d376326b75
 	github.com/ovh/configstore v0.6.2
 	github.com/pelletier/go-toml v1.8.0
 	github.com/stretchr/testify v1.9.0

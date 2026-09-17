@@ -195,22 +195,6 @@ Variant of [ChaCha20-Poly1305](https://tools.ietf.org/html/rfc7539) with extende
 
 :exclamation: **Nonces are randomly generated and should not be repeated with *xchacha20-poly1305*, remember to rollover your key on a regular basis. Nonce size is 192 bits, which is acceptable for random generation.**
 
-### aes-pmac-siv
-
-Robust | Fast | Proven
---- | --- | ---
-:star::star::star: | :star::star: | :star:
-
-Parallelized implementation of [AES-SIV](https://tools.ietf.org/html/rfc5297) (256 bits), with built-in authentication.
-
-:exclamation: **This cipher is still young, use with caution.**
-
-:exclamation: **This is one of the rare ciphers which is not weak to nonce reuse.**
-
-More information:
-* [AES-PMAC-SIV](https://github.com/miscreant/miscreant/wiki/AES-PMAC-SIV)
-* [miscreant and the nonce reuse issue](https://tonyarcieri.com/introducing-miscreant-a-multi-language-misuse-resistant-encryption-library)
-
 ### hmac
 
 Robust | Fast | Proven
