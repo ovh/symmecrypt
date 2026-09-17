@@ -195,6 +195,16 @@ Variant of [ChaCha20-Poly1305](https://tools.ietf.org/html/rfc7539) with extende
 
 :exclamation: **Nonces are randomly generated and should not be repeated with *xchacha20-poly1305*, remember to rollover your key on a regular basis. Nonce size is 192 bits, which is acceptable for random generation.**
 
+### aes-gcm-siv
+
+Robust | Fast | Proven
+--- | --- | ---
+:star::star::star: | :star::star: | :star::star:
+
+[AES-GCM-SIV](https://tools.ietf.org/html/rfc8452) (256 bits), a nonce misuse-resistant AEAD, with built-in authentication.
+
+:exclamation: **This is one of the rare ciphers which is not weak to nonce reuse: repeating a nonce only reveals whether two messages are identical, without compromising the key. Slower than *aes-gcm* (two passes over the data).**
+
 ### hmac
 
 Robust | Fast | Proven
@@ -240,3 +250,12 @@ It can be used to generate new random encryption keys for any of the built-in sy
     ENCRYPTED=$(echo foo bar baz | symmecrypt encrypt --base64)
     PLAIN=$(echo $ENCRYPTED | symmecrypt decrypt --base64)
 ```
+
+## License
+
+*symmecrypt* is released under a BSD 3-Clause license (see [LICENSE](LICENSE)), with the following exception:
+
+* `ciphers/aesgcmsiv/polyval.go` and `ciphers/aesgcmsiv/siv.go` are derived from the
+  [Tink](https://github.com/tink-crypto/tink-go) project, Copyright Google LLC,
+  licensed under the Apache License 2.0 (see [ciphers/aesgcmsiv/LICENSE](ciphers/aesgcmsiv/LICENSE)),
+  modified to implement Go's `cipher.AEAD` interface.
