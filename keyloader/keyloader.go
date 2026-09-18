@@ -437,7 +437,7 @@ func (kh *watchKey) watch(store *configstore.Store) {
 		// small sleep to yield to symmecrypt/seal in case of seal change
 		b, err := LoadKeyFromStore(kh.identifier, store)
 		if err != nil {
-			symmecrypt.LogErrorFunc("symmecrypt/keyloader: configuration fetch error for key '%s': %s", kh.identifier, err)
+			symmecrypt.LogErrorFunc(fmt.Sprintf("symmecrypt/keyloader: configuration fetch error for key '%s': %v", kh.identifier, err))
 			continue
 		}
 		k := kh.Key()
