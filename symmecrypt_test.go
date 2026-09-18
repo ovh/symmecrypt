@@ -31,7 +31,12 @@ func ProviderTest() (configstore.ItemList, error) {
 			),
 			configstore.NewItem(
 				keyloader.EncryptionKeyConfigName,
-				`{"key":"7db2b4b695e11563edca94b0f9c7ad16919fc11eac414c1b1706cbaa3c3e61a4b884301ae4e8fbedcc4f000b9c52904f13ea9456379d373524dea7fef79b39f7","identifier":"test-composite","sealed":false,"timestamp":1522325758,"cipher":"aes-pmac-siv"}`,
+				`{"key":"057fcf64b6df2fefc22125791e926cd015d4602a20da0a667be3dcf7e03c81b8","identifier":"test-gcm-siv","sealed":false,"timestamp":1522325806,"cipher":"aes-gcm-siv"}`,
+				1,
+			),
+			configstore.NewItem(
+				keyloader.EncryptionKeyConfigName,
+				`{"key":"7db2b4b695e11563edca94b0f9c7ad16919fc11eac414c1b1706cbaa3c3e61a4","identifier":"test-composite","sealed":false,"timestamp":1522325758,"cipher":"aes-gcm"}`,
 				1,
 			),
 			configstore.NewItem(
@@ -95,12 +100,20 @@ func TestMain(m *testing.M) {
 }
 
 func TestEncryptDecrypt(t *testing.T) {
+	for _, identifier := range []string{"test", "test-gcm-siv"} {
+		t.Run(identifier, func(t *testing.T) {
+			testEncryptDecrypt(t, identifier)
+		})
+	}
+}
+
+func testEncryptDecrypt(t *testing.T, identifier string) {
 	text := []byte("eoeodecrytp")
 
 	extra := []byte("aa")
 	extra2 := []byte("bb")
 
-	k, err := keyloader.LoadKey("test")
+	k, err := keyloader.LoadKey(identifier)
 	if err != nil {
 		t.Fatal(err)
 	}

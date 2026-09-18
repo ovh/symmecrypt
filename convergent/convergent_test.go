@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ovh/symmecrypt/ciphers/aesgcm"
-	"github.com/ovh/symmecrypt/ciphers/aespmacsiv"
+	"github.com/ovh/symmecrypt/ciphers/aesgcmsiv"
 	"github.com/ovh/symmecrypt/ciphers/chacha20poly1305"
 	"github.com/ovh/symmecrypt/ciphers/hmac"
 	"github.com/ovh/symmecrypt/ciphers/xchacha20poly1305"
@@ -47,7 +47,7 @@ func TestKeyFromHash(t *testing.T) {
 func TestConvergentEncryption(t *testing.T) {
 	ciphers := []string{
 		aesgcm.CipherName,
-		aespmacsiv.CipherName,
+		aesgcmsiv.CipherName,
 		chacha20poly1305.CipherName,
 		xchacha20poly1305.CipherName,
 		hmac.CipherName,

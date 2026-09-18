@@ -17,14 +17,14 @@ import (
 	// aes-gcm cipher
 	_ "github.com/ovh/symmecrypt/ciphers/aesgcm"
 
+	// aes-gcm-siv cipher
+	_ "github.com/ovh/symmecrypt/ciphers/aesgcmsiv"
+
 	// chacha20-poly1305 cipher
 	_ "github.com/ovh/symmecrypt/ciphers/chacha20poly1305"
 
 	// xchacha20-poly1305 cipher
 	"github.com/ovh/symmecrypt/ciphers/xchacha20poly1305"
-
-	// aes-pmac-siv cipher
-	_ "github.com/ovh/symmecrypt/ciphers/aespmacsiv"
 
 	// hmac cipher
 	_ "github.com/ovh/symmecrypt/ciphers/hmac"

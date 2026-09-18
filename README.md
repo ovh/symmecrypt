@@ -4,7 +4,7 @@
 It provides recommended implementations of crypto algorithms and facilities around configuration management
 and encryption key lifecycle.
 
-[![GoDoc](https://godoc.org/github.com/ovh/symmecrypt?status.svg)](https://godoc.org/github.com/ovh/symmecrypt) [![Go Report Card](https://goreportcard.com/badge/github.com/ovh/symmecrypt)](https://goreportcard.com/report/github.com/ovh/symmecrypt)
+[![CI](https://github.com/ovh/symmecrypt/actions/workflows/ci.yml/badge.svg)](https://github.com/ovh/symmecrypt/actions/workflows/ci.yml) [![GoDoc](https://godoc.org/github.com/ovh/symmecrypt?status.svg)](https://godoc.org/github.com/ovh/symmecrypt) [![Go Report Card](https://goreportcard.com/badge/github.com/ovh/symmecrypt)](https://goreportcard.com/report/github.com/ovh/symmecrypt)
 
 ## Overview
 
@@ -195,21 +195,15 @@ Variant of [ChaCha20-Poly1305](https://tools.ietf.org/html/rfc7539) with extende
 
 :exclamation: **Nonces are randomly generated and should not be repeated with *xchacha20-poly1305*, remember to rollover your key on a regular basis. Nonce size is 192 bits, which is acceptable for random generation.**
 
-### aes-pmac-siv
+### aes-gcm-siv
 
 Robust | Fast | Proven
 --- | --- | ---
-:star::star::star: | :star::star: | :star:
+:star::star::star: | :star::star: | :star::star:
 
-Parallelized implementation of [AES-SIV](https://tools.ietf.org/html/rfc5297) (256 bits), with built-in authentication.
+[AES-GCM-SIV](https://tools.ietf.org/html/rfc8452) (256 bits), a nonce misuse-resistant AEAD, with built-in authentication.
 
-:exclamation: **This cipher is still young, use with caution.**
-
-:exclamation: **This is one of the rare ciphers which is not weak to nonce reuse.**
-
-More information:
-* [AES-PMAC-SIV](https://github.com/miscreant/miscreant/wiki/AES-PMAC-SIV)
-* [miscreant and the nonce reuse issue](https://tonyarcieri.com/introducing-miscreant-a-multi-language-misuse-resistant-encryption-library)
+:exclamation: **This is one of the rare ciphers which is not weak to nonce reuse: repeating a nonce only reveals whether two messages are identical, without compromising the key. Slower than *aes-gcm* (two passes over the data).**
 
 ### hmac
 
@@ -224,35 +218,108 @@ HMAC-sha512 for authentication only. Note: if the input consists only of printab
 ## Command-line tool
 
 A command-line tool is available as a companion to the library ([source](https://github.com/ovh/symmecrypt/tree/master/cmd/symmecrypt)).
-
-It can be used to generate new random encryption keys for any of the built-in symmecrypt ciphers, and to encrypt/decrypt arbitrary data.
-
-### Example (new key)
-```bash
-    $ symmecrypt new aes-gcm --key=storage_key
-    {"identifier":"storage_key","cipher":"aes-gcm","timestamp":1538383069,"key":"46ca74bf7a980ffbfdeea5a66593f7a8f12039f872694015e66c44b652165ee4"}
-```
-
-### Example (file)
-```bash
-    $ export ENCRYPTION_KEY_BASE64=$(symmecrypt new aes-gcm --base64)
-    $ symmecrypt encrypt <<EOF >test.encrypted
-    foo
-    bar
-    baz
-    EOF
-    $ cat -e test.encrypted
-    ^^JDM-1^EM-$M-^K1nX;^WM-^HC6^Xw^?^BM-.M-p^[M-%=^M-^ZM-uM-%M-2^H6M-sM-NM-FM-^H^RM-]g^_&$
-    $ symmecrypt decrypt <test.encrypted
-    foo
-    bar
-    baz
-```
-
-### Example (script)
+It is also the quickest way to discover what the library does — each command below maps to a library concept.
 
 ```bash
-    export ENCRYPTION_KEY_BASE64=$(symmecrypt new aes-gcm --base64)
-    ENCRYPTED=$(echo foo bar baz | symmecrypt encrypt --base64)
-    PLAIN=$(echo $ENCRYPTED | symmecrypt decrypt --base64)
+go install github.com/ovh/symmecrypt/cmd/symmecrypt@latest
 ```
+
+### Generate a key
+
+`key new` produces a key configuration (the same JSON the library loads through *keyloader*):
+
+```bash
+$ symmecrypt key new --cipher aes-gcm --identifier storage
+{"identifier":"storage","cipher":"aes-gcm","timestamp":1758124991,"key":"46ca74bf..."}
+```
+
+### Encrypt / decrypt
+
+Keys are provided via `--key-file`, `--config` (configstore file) or the `ENCRYPTION_KEY_BASE64`
+environment variable (comma-separated list of base64-encoded key configs):
+
+```bash
+$ export ENCRYPTION_KEY_BASE64=$(symmecrypt key new --base64)
+$ echo hello | symmecrypt encrypt --base64 | symmecrypt decrypt --base64
+hello
+```
+
+Extra data act as additional authenticated data (MAC): decryption fails unless the same values are passed.
+
+```bash
+$ echo hello | symmecrypt encrypt --base64 --extra ctx1 --extra ctx2 > data.enc
+$ symmecrypt decrypt --base64 --extra ctx1 --extra ctx2 < data.enc     # ok
+$ symmecrypt decrypt --base64 < data.enc                               # fails
+```
+
+### Key rollover
+
+`key rotate` adds a new revision (same identifier, newer timestamp). The library keyring then
+encrypts with the newest key while still decrypting older ciphertexts. `key inspect` shows the
+metadata — never the key material.
+
+```bash
+$ symmecrypt key rotate --key-file key.json > keyring.json
+$ symmecrypt key inspect --key-file keyring.json
+IDENTIFIER  CIPHER              TIMESTAMP             SEALED
+storage     xchacha20-poly1305  2026-09-17T16:20:04Z  false
+storage     xchacha20-poly1305  2026-09-17T15:03:11Z  false
+```
+
+### configstore integration
+
+`--config` reads keys from a [configstore](https://github.com/ovh/configstore) file, the same
+format the library consumes in production:
+
+```yaml
+- key: encryption-key
+  value: '{"identifier":"storage","cipher":"xchacha20-poly1305","timestamp":1758124991,"key":"..."}'
+```
+
+```bash
+$ echo hello | symmecrypt encrypt --config config.yml --base64
+```
+
+### Large files
+
+`--stream` switches to the chunked format of the *symmecrypt/stream* package (256KiB chunks,
+constant memory). The stream format is **not** compatible with the plain format.
+
+```bash
+$ symmecrypt encrypt --stream --in backup.tar --out backup.tar.enc
+$ symmecrypt decrypt --stream --in backup.tar.enc --out backup.tar
+```
+
+### Seal (shamir)
+
+`seal new` generates a seal (see [symmecrypt/seal](https://github.com/ovh/symmecrypt/tree/master/seal)):
+the config goes to stdout, the shards to stderr — shown once, distribute them.
+
+```bash
+$ symmecrypt seal new --min 2 --total 3 > seal.json 2> shards.txt
+$ symmecrypt key new | symmecrypt key seal --seal-file seal.json --shard-file shards.txt > sealed.key
+$ echo hello | symmecrypt encrypt --key-file sealed.key --seal-file seal.json \
+    --shard "$SHARD_1" --shard "$SHARD_2" --base64
+```
+
+### Migration from the previous CLI
+
+The CLI was rewritten (kingpin dropped for the standard library) with a new command layout:
+
+| Before | After |
+|---|---|
+| `symmecrypt new [cipher] --key=ID` | `symmecrypt key new --cipher NAME --identifier ID` |
+| default cipher `aes-gcm` | default cipher `xchacha20-poly1305` (pass `--cipher aes-gcm` for the old default) |
+| flags accepted anywhere | flags must follow the command |
+| empty stdin exited silently | empty input is processed normally |
+
+The `ENCRYPTION_KEY_BASE64` format is unchanged.
+
+## License
+
+*symmecrypt* is released under a BSD 3-Clause license (see [LICENSE](LICENSE)), with the following exception:
+
+* `ciphers/aesgcmsiv/polyval.go` and `ciphers/aesgcmsiv/siv.go` are derived from the
+  [Tink](https://github.com/tink-crypto/tink-go) project, Copyright Google LLC,
+  licensed under the Apache License 2.0 (see [ciphers/aesgcmsiv/LICENSE](ciphers/aesgcmsiv/LICENSE)),
+  modified to implement Go's `cipher.AEAD` interface.
