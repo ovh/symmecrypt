@@ -66,11 +66,14 @@ func (k KeyConfig) String() string {
 }
 
 // A watchKey is an implementation of a key that watches for configstore updates
-// and hot reloads itself.
+// and hot reloads itself. It implements io.Closer: Close stops the watch
+// goroutine and must be called when the key is no longer used.
 type watchKey struct {
 	identifier string
 	k          symmecrypt.Key
 	mut        sync.RWMutex
+	stop       chan struct{}
+	stopOnce   sync.Once
 }
 
 // A sealedKey is an implementation of an encryption key that is encrypted using symmecrypt/seal.
@@ -392,7 +395,7 @@ func WatchKeyFromStore(identifier string, store *configstore.Store) (symmecrypt.
 		return nil, err
 	}
 
-	holder := &watchKey{identifier: identifier, k: b}
+	holder := &watchKey{identifier: identifier, k: b, stop: make(chan struct{})}
 	go holder.watch(store)
 
 	return holder, nil
@@ -419,13 +422,22 @@ func WatchSingleKeyFromStore(store *configstore.Store) (symmecrypt.Key, error) {
  */
 
 // Watch for configstore update notifications, then reload the key through LoadKey().
+// The loop exits when Close() is called. The configstore watcher channel itself
+// cannot be deregistered (no such API in configstore), but it is buffered and
+// notified without blocking: abandoning it is harmless.
 func (kh *watchKey) watch(store *configstore.Store) {
-	for range store.Watch() {
+	watchCh := store.Watch()
+	for {
+		select {
+		case <-kh.stop:
+			return
+		case <-watchCh:
+		}
 		time.Sleep(10 * time.Millisecond)
 		// small sleep to yield to symmecrypt/seal in case of seal change
 		b, err := LoadKeyFromStore(kh.identifier, store)
 		if err != nil {
-			symmecrypt.LogErrorFunc("symmecrypt/keyloader: configuration fetch error for key '%s': %s", kh.identifier, err)
+			symmecrypt.LogErrorFunc(fmt.Sprintf("symmecrypt/keyloader: configuration fetch error for key '%s': %v", kh.identifier, err))
 			continue
 		}
 		k := kh.Key()
@@ -434,6 +446,13 @@ func (kh *watchKey) watch(store *configstore.Store) {
 		kh.k = b
 		kh.mut.Unlock()
 	}
+}
+
+// Close stops the watch goroutine. The key remains usable with its current
+// key material, but stops hot-reloading. Safe to call multiple times.
+func (kh *watchKey) Close() error {
+	kh.stopOnce.Do(func() { close(kh.stop) })
+	return nil
 }
 
 func (kh *watchKey) Encrypt(text []byte, extra ...[]byte) ([]byte, error) {

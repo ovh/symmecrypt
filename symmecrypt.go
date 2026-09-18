@@ -9,6 +9,9 @@ import (
 	"sync"
 )
 
+// LogErrorFunc is the Println-style logger used for background errors
+// (watch reloads, ...). Messages are pre-formatted by the callers:
+// override it with any func(...interface{}) sink.
 var LogErrorFunc = log.Println
 
 // Key is an abstraction of a symmetric encryption key

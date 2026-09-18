@@ -78,7 +78,7 @@ func InitFromStore(onChange func(*Seal), s *configstore.Store) error {
 		for range s.Watch() {
 			newSeal, err := NewSealFromStore(s)
 			if err != nil {
-				symmecrypt.LogErrorFunc("symmecrypt/seal: configuration fetch error: %w", err)
+				symmecrypt.LogErrorFunc(fmt.Sprintf("symmecrypt/seal: configuration fetch error: %v", err))
 				continue
 			}
 			if diff(seal, newSeal) && onChange != nil {
