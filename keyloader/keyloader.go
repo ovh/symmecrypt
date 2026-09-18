@@ -76,6 +76,7 @@ type watchKey struct {
 // A sealedKey is an implementation of an encryption key that is encrypted using symmecrypt/seal.
 type sealedKey struct {
 	decryptedKey symmecrypt.Key
+	err          error // written once before waitCh is closed
 	decrypted    uint32
 	waitCh       chan struct{}
 }
@@ -478,33 +479,46 @@ func (kh *watchKey) Key() symmecrypt.Key {
  */
 
 // Return an instance of sealedKey, that will decrypt itself with the crypto/seal singleton when it gets unsealed.
-// If there is a misconfiguration (no crypto/seal configured, the key decryption fails, or the key factory fails), THIS WILL PANIC.
+// If there is a misconfiguration (no crypto/seal configured, the key decryption fails, or the key factory fails),
+// the key becomes permanently unusable: all its operations return a descriptive error. A configuration change
+// (e.g. through WatchKey) is the way to recover, by rebuilding a fresh key.
 func newSealedKey(cfg *KeyConfig, factory symmecrypt.KeyFactory) symmecrypt.Key {
 	ret := &sealedKey{waitCh: make(chan struct{})}
 	go func() {
+		defer close(ret.waitCh)
 		if !seal.WaitUnseal() {
-			panic(fmt.Sprintf("Trying to unseal encryption key '%s': no seal configured", cfg.Identifier))
+			ret.err = fmt.Errorf("trying to unseal encryption key '%s': no seal configured", cfg.Identifier)
+			return
 		}
 		decK, err := UnsealKey(cfg, seal.Global())
 		if err != nil {
-			panic(fmt.Sprintf("Sealed encryption key '%s' cannot be decrypted: %s", cfg.Identifier, err.Error()))
+			ret.err = fmt.Errorf("sealed encryption key '%s' cannot be decrypted: %w", cfg.Identifier, err)
+			return
 		}
 		ret.decryptedKey, err = factory.NewKey(decK.Key)
-
 		if err != nil {
-			panic(fmt.Sprintf("Sealed encryption key '%s' cannot be initialized: %s", cfg.Identifier, err.Error()))
+			ret.err = fmt.Errorf("sealed encryption key '%s' cannot be initialized: %w", cfg.Identifier, err)
+			return
 		}
 		atomic.StoreUint32(&ret.decrypted, 1)
-		close(ret.waitCh)
 	}()
 	return ret
 }
 
 func (s *sealedKey) Key() (symmecrypt.Key, error) {
-	if atomic.LoadUint32(&s.decrypted) == 0 {
+	if atomic.LoadUint32(&s.decrypted) == 1 {
+		return s.decryptedKey, nil
+	}
+	select {
+	case <-s.waitCh:
+		// unsealing terminated without success: report the definitive error
+		if s.err != nil {
+			return nil, s.err
+		}
+		return s.decryptedKey, nil
+	default:
 		return nil, ErrKeySealed
 	}
-	return s.decryptedKey, nil
 }
 
 func (s *sealedKey) Encrypt(text []byte, extra ...[]byte) ([]byte, error) {
