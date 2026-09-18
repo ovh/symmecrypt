@@ -216,7 +216,7 @@ func (b *KeyAEAD) Encrypt(text []byte, extra ...[]byte) ([]byte, error) {
 }
 
 // Decrypt arbitrary data. Extra data can be passed for MAC.
-func (b KeyAEAD) Decrypt(text []byte, extra ...[]byte) ([]byte, error) {
+func (b *KeyAEAD) Decrypt(text []byte, extra ...[]byte) ([]byte, error) {
 	ciph, err := b.cipherFactory(b.key)
 	if err != nil {
 		return nil, err
@@ -243,7 +243,7 @@ func (b KeyAEAD) Decrypt(text []byte, extra ...[]byte) ([]byte, error) {
 }
 
 // EncryptMarshal encrypts the marshaled representation of an arbitrary object. Extra data can be passed for MAC.
-func (b KeyAEAD) EncryptMarshal(i interface{}, extra ...[]byte) (string, error) {
+func (b *KeyAEAD) EncryptMarshal(i interface{}, extra ...[]byte) (string, error) {
 	serialized, err := json.Marshal(i)
 	if err != nil {
 		return "", err
@@ -256,7 +256,7 @@ func (b KeyAEAD) EncryptMarshal(i interface{}, extra ...[]byte) (string, error) 
 }
 
 // DecryptMarshal decrypts the marshaled representation of an arbitrary object. Extra data can be passed for MAC.
-func (b KeyAEAD) DecryptMarshal(s string, target interface{}, extra ...[]byte) error {
+func (b *KeyAEAD) DecryptMarshal(s string, target interface{}, extra ...[]byte) error {
 	data, err := hex.DecodeString(s)
 	if err != nil {
 		return err
@@ -271,11 +271,11 @@ func (b KeyAEAD) DecryptMarshal(s string, target interface{}, extra ...[]byte) e
 }
 
 // Wait is a noop for regular implementations: the key is always ready
-func (b KeyAEAD) Wait() {
+func (b *KeyAEAD) Wait() {
 }
 
 // String returns a hex encoded representation of the key
-func (b KeyAEAD) String() (string, error) {
+func (b *KeyAEAD) String() (string, error) {
 	return hex.EncodeToString(b.key), nil
 }
 
