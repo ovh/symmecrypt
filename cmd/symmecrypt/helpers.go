@@ -228,15 +228,32 @@ func loadSeal(sealFile string, shards, shardFiles []string) (*seal.Seal, error) 
 // unsealConfigs returns copies of the configs, unsealed with the given seal.
 // The seal is required only if at least one config is sealed.
 func unsealConfigs(cfgs []*keyloader.KeyConfig, sealFile string, shards, shardFiles []string) ([]*keyloader.KeyConfig, error) {
-	sealed := false
+	var hasSealed, hasPlain bool
+	var maxSealedTS, maxPlainTS int64
 	for _, cfg := range cfgs {
 		if cfg.Sealed {
-			sealed = true
-			break
+			if !hasSealed || cfg.Timestamp > maxSealedTS {
+				maxSealedTS = cfg.Timestamp
+			}
+			hasSealed = true
+		} else {
+			if !hasPlain || cfg.Timestamp > maxPlainTS {
+				maxPlainTS = cfg.Timestamp
+			}
+			hasPlain = true
 		}
 	}
-	if !sealed {
+	if !hasSealed {
 		return cfgs, nil
+	}
+
+	// Replicate keyloader.NewKey's downgrade detection BEFORE unsealing:
+	// once the configs are unsealed the library check cannot see them
+	// anymore. A non-sealed key outranking sealed keys looks like an
+	// attacker-appended key meant to capture new encryptions; ties are
+	// rejected too (fail closed).
+	if hasPlain && maxPlainTS >= maxSealedTS {
+		return nil, errors.New("DANGER! detected downgrade to non-sealed encryption key: a non-sealed key outranks sealed keys, this looks malicious, aborting")
 	}
 	if sealFile == "" {
 		return nil, errors.New("sealed key config: provide --seal-file and shards (--shard/--shard-file)")
