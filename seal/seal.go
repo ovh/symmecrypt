@@ -17,6 +17,10 @@ import (
 const (
 	nonceLen = 16
 
+	// sssaShardBlockLen is the length of one encoded shamir shard block
+	// (44 base64 chars for x + 44 for y) as produced by sssa-golang.
+	sssaShardBlockLen = 88
+
 	// ConfigName is the name of the config item in the configstore
 	ConfigName = "seal"
 
@@ -223,25 +227,43 @@ func (r *Seal) AddShard(s string) (bool, error) {
 		return false, SealError{errors.New("already unsealed!")}
 	}
 
-	if !sssa.IsValidShare(s) {
+	// sssa.IsValidShare accepts the empty string (len%88==0) and any
+	// in-range base64 blocks: also require a non-empty, well-sized shard.
+	if len(s) == 0 || len(s)%sssaShardBlockLen != 0 || !sssa.IsValidShare(s) {
 		return false, SealError{errors.New("invalid shard")}
 	}
 
 	r.shards[s] = struct{}{}
-	r.Progress = uint(len(r.shards))
 
-	if uint(len(r.shards)) < r.Min {
+	// All shamir shards of a given seal share the same length; feeding
+	// sssa.Combine a mixed-length set makes it panic (index out of range).
+	// Group shards by length so that a malformed-but-plausible shard can
+	// never crash the process nor prevent the legitimate shards from
+	// reaching the threshold. Only the group of the shard just added can
+	// newly reach Min.
+	var group []string
+	counts := map[int]int{}
+	for sh := range r.shards {
+		counts[len(sh)]++
+		if len(sh) == len(s) {
+			group = append(group, sh)
+		}
+	}
+	maxGroup := 0
+	for _, c := range counts {
+		if c > maxGroup {
+			maxGroup = c
+		}
+	}
+	r.Progress = uint(maxGroup)
+
+	if uint(len(group)) < r.Min {
 		return false, nil
 	}
 
 	// good to go!
 
-	shards := []string{}
-	for sh := range r.shards {
-		shards = append(shards, sh)
-	}
-
-	plain, err := combine(shards)
+	plain, err := combine(group)
 	if err != nil {
 		return r.reset(SealError{errors.New("bad shamir shards: invalid decoded payload")})
 	}
